@@ -1,0 +1,16 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Backups / scratch
+*.backup
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
