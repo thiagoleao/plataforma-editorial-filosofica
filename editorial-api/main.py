@@ -35,6 +35,36 @@ def require_api_key(function):
     return decorated
 
 
+NORMALIZE_CONCEPT_KEY_SQL = "editorial.immutable_unaccent(lower(regexp_replace(trim(%s), '[-_]+', ' ', 'g')))"
+
+
+def sync_concepts(cursor, concept_texts, segment_id=None, card_id=None):
+    """Resolve texto livre de conceitos para editorial.concepts (ADR-011) e grava os vínculos."""
+    for raw_text in concept_texts or []:
+        text = (raw_text or "").strip()
+        if not text:
+            continue
+        cursor.execute("""
+            INSERT INTO editorial.concepts (canonical_name)
+            VALUES (%s)
+            ON CONFLICT (normalized_key) DO UPDATE SET last_observed_at = NOW()
+            RETURNING id
+        """, (text,))
+        concept_id = cursor.fetchone()["id"]
+        if segment_id:
+            cursor.execute("""
+                INSERT INTO editorial.segment_concepts (segment_id, concept_id)
+                VALUES (%s, %s)
+                ON CONFLICT DO NOTHING
+            """, (segment_id, concept_id))
+        if card_id:
+            cursor.execute("""
+                INSERT INTO editorial.card_concepts (card_id, concept_id)
+                VALUES (%s, %s)
+                ON CONFLICT DO NOTHING
+            """, (card_id, concept_id))
+
+
 @app.get("/health")
 def health():
     try:
@@ -59,6 +89,56 @@ def list_themes():
                 WHERE active = TRUE
                 ORDER BY name
             """)
+            rows = cursor.fetchall()
+    return jsonify(rows)
+
+
+@app.get("/segment-types")
+@require_api_key
+def list_segment_types():
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                SELECT type_key, name, description, editorially_disposable
+                FROM editorial.segment_types
+                ORDER BY name
+            """)
+            rows = cursor.fetchall()
+    return jsonify(rows)
+
+
+@app.get("/speakers")
+@require_api_key
+def list_speakers():
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                SELECT id, speaker_key, canonical_name, aliases, description, is_channeled_entity
+                FROM editorial.speakers
+                ORDER BY canonical_name
+            """)
+            rows = cursor.fetchall()
+    return jsonify(rows)
+
+
+@app.get("/concepts")
+@require_api_key
+def list_concepts():
+    limit = min(request.args.get("limit", default=100, type=int), 500)
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                SELECT
+                    c.id, c.canonical_name, c.aliases, c.description,
+                    COUNT(DISTINCT sc.segment_id) AS segment_count,
+                    COUNT(DISTINCT cc.card_id) AS card_count
+                FROM editorial.concepts c
+                LEFT JOIN editorial.segment_concepts sc ON sc.concept_id = c.id
+                LEFT JOIN editorial.card_concepts cc ON cc.concept_id = c.id
+                GROUP BY c.id
+                ORDER BY (COUNT(DISTINCT sc.segment_id) + COUNT(DISTINCT cc.card_id)) DESC, c.canonical_name
+                LIMIT %s
+            """, (limit,))
             rows = cursor.fetchall()
     return jsonify(rows)
 
@@ -119,17 +199,39 @@ def upsert_segment():
             if not source:
                 return jsonify({"error": "Source not found", "external_file_id": payload["external_file_id"]}), 404
 
+            cursor.execute("SELECT 1 FROM editorial.segment_types WHERE type_key = %s", (payload["segment_type"],))
+            if not cursor.fetchone():
+                return jsonify({"error": "Unknown segment_type", "segment_type": payload["segment_type"]}), 400
+
+            cursor.execute("SELECT * FROM editorial.content_segments WHERE segment_key = %s", (payload["segment_key"],))
+            existing = cursor.fetchone()
+            if existing:
+                cursor.execute("""
+                    INSERT INTO editorial.segment_revisions (
+                        segment_id, segment_key, segment_order, segment_type, title,
+                        executive_summary, full_text, keywords, concepts, related_themes,
+                        editorial_applications, editorial_relevance, speaker_type, is_channeled
+                    ) VALUES (
+                        %(id)s, %(segment_key)s, %(segment_order)s, %(segment_type)s, %(title)s,
+                        %(executive_summary)s, %(full_text)s, %(keywords)s, %(concepts)s, %(related_themes)s,
+                        %(editorial_applications)s, %(editorial_relevance)s, %(speaker_type)s, %(is_channeled)s
+                    )
+                """, existing)
+
+            speaker_key_lookup = payload.get("speaker_type") or "condutor_sessao"
+
             cursor.execute("""
                 INSERT INTO editorial.content_segments (
                     segment_key, source_id, segment_order, segment_type, title,
                     executive_summary, full_text, keywords, concepts,
                     related_themes, editorial_applications, editorial_relevance,
-                    speaker_type, is_channeled, updated_at
+                    speaker_type, is_channeled, speaker_id, updated_at
                 ) VALUES (
                     %(segment_key)s, %(source_id)s, %(segment_order)s, %(segment_type)s,
                     %(title)s, %(executive_summary)s, %(full_text)s, %(keywords)s,
                     %(concepts)s, %(related_themes)s, %(editorial_applications)s,
-                    %(editorial_relevance)s, %(speaker_type)s, %(is_channeled)s, NOW()
+                    %(editorial_relevance)s, %(speaker_type)s, %(is_channeled)s,
+                    (SELECT id FROM editorial.speakers WHERE speaker_key = %(speaker_key_lookup)s), NOW()
                 )
                 ON CONFLICT (segment_key)
                 DO UPDATE SET
@@ -145,6 +247,7 @@ def upsert_segment():
                     editorial_relevance = EXCLUDED.editorial_relevance,
                     speaker_type = EXCLUDED.speaker_type,
                     is_channeled = EXCLUDED.is_channeled,
+                    speaker_id = EXCLUDED.speaker_id,
                     updated_at = NOW()
                 RETURNING *
             """, {
@@ -162,8 +265,12 @@ def upsert_segment():
                 "editorial_relevance": payload.get("editorial_relevance", 0),
                 "speaker_type": payload.get("speaker_type"),
                 "is_channeled": bool(payload.get("is_channeled", False)),
+                "speaker_key_lookup": speaker_key_lookup,
             })
             row = cursor.fetchone()
+
+            sync_concepts(cursor, payload.get("concepts", []), segment_id=row["id"])
+
     return jsonify(row), 201
 
 
@@ -173,6 +280,7 @@ def list_segments():
     theme = request.args.get("theme")
     segment_type = request.args.get("type")
     channeled = request.args.get("channeled")
+    concept = request.args.get("concept")
     limit = min(request.args.get("limit", default=50, type=int), 500)
 
     clauses = []
@@ -186,6 +294,15 @@ def list_segments():
     if channeled is not None:
         clauses.append("cs.is_channeled = %s")
         parameters.append(channeled.lower() == "true")
+    if concept:
+        clauses.append(f"""
+            cs.id IN (
+                SELECT sc.segment_id FROM editorial.segment_concepts sc
+                JOIN editorial.concepts co ON co.id = sc.concept_id
+                WHERE co.normalized_key = {NORMALIZE_CONCEPT_KEY_SQL}
+            )
+        """)
+        parameters.append(concept)
 
     where = "WHERE " + " AND ".join(clauses) if clauses else ""
     parameters.append(limit)
@@ -249,6 +366,19 @@ def upsert_knowledge_card():
                 if segment:
                     segment_id = segment["id"]
 
+            cursor.execute("SELECT * FROM editorial.knowledge_cards WHERE card_key = %s", (payload["card_key"],))
+            existing = cursor.fetchone()
+            if existing:
+                cursor.execute("""
+                    INSERT INTO editorial.card_revisions (
+                        card_id, card_key, title, summary, concepts, principles,
+                        quotes, evidence, relevance_score
+                    ) VALUES (
+                        %(id)s, %(card_key)s, %(title)s, %(summary)s, %(concepts)s, %(principles)s,
+                        %(quotes)s, %(evidence)s, %(relevance_score)s
+                    )
+                """, existing)
+
             cursor.execute("""
                 INSERT INTO editorial.knowledge_cards (
                     card_key, source_id, theme_id, segment_id, block_number,
@@ -287,6 +417,9 @@ def upsert_knowledge_card():
                 "relevance_score": payload["relevance_score"],
             })
             row = cursor.fetchone()
+
+            sync_concepts(cursor, payload.get("concepts", []), card_id=row["id"])
+
     return jsonify(row), 201
 
 
@@ -294,12 +427,23 @@ def upsert_knowledge_card():
 @require_api_key
 def list_knowledge_cards():
     theme_key = request.args.get("theme")
+    concept = request.args.get("concept")
     limit = min(request.args.get("limit", default=50, type=int), 500)
+    clauses = []
     parameters = []
-    where = ""
     if theme_key:
-        where = "WHERE t.theme_key = %s"
+        clauses.append("t.theme_key = %s")
         parameters.append(theme_key)
+    if concept:
+        clauses.append(f"""
+            kc.id IN (
+                SELECT cc.card_id FROM editorial.card_concepts cc
+                JOIN editorial.concepts co ON co.id = cc.concept_id
+                WHERE co.normalized_key = {NORMALIZE_CONCEPT_KEY_SQL}
+            )
+        """)
+        parameters.append(concept)
+    where = "WHERE " + " AND ".join(clauses) if clauses else ""
     parameters.append(limit)
 
     with get_connection() as connection:
