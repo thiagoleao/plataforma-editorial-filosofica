@@ -121,6 +121,15 @@ Plano para viabilizar a geração de capítulos de livro com qualidade, a partir
 
 - [ADR-015](./docs/adr/ADR-015.md) — Publicação Final. Exportação DOCX (primário) → PDF/EPUB derivados, metadados e manifesto de rastreabilidade.
 
+### Roadmap Editorial UI v2 (2026-07-15)
+
+Evolução da `editorial-ui` pedida pelo usuário: acesso hospedado com login, insights automáticos, editor de manuscrito, design. Segue o processo da [ADR-017](./docs/adr/ADR-017.md) — as 4 ADRs abaixo foram registradas em bloco (status "Proposta") antes de qualquer implementação; a implementação de cada uma só começa depois de todas documentadas, na ordem 018 → 019 → 020 → 021 (rollout distribuído). Plano completo em `~/.claude/plans/sunny-hugging-leaf.md`.
+
+- [ADR-018](./docs/adr/ADR-018.md) — Acesso Público Autenticado (NextAuth + Google OAuth). Substitui o proxy CLI/IAM por login direto no navegador, allowlist de e-mails, `middleware.ts` protegendo todas as rotas incluindo `app/api/*`. Cloud Run passa a ser `--allow-unauthenticated`.
+- [ADR-019](./docs/adr/ADR-019.md) — Insights Automáticos de Capítulos. Novo pipeline assíncrono (fluxo n8n agendado) que varre o acervo e sugere capítulos candidatos como cards — primeira vez que o projeto usa geração de texto (chat completion) da OpenAI, não só embeddings. Inclui o sinal de "aprendizado de estilo" (escopo aprovado pelo usuário: só estrutura/curadoria, nunca prosa nova).
+- [ADR-020](./docs/adr/ADR-020.md) — Editor de Manuscrito com Preservação de Blocos Literais. Editor rico (Tiptap) em duas fases — edição de transições, depois um manuscrito contínuo por capítulo com blocos de canalização travados (trava dupla: cliente + verificação server-side).
+- [ADR-021](./docs/adr/ADR-021.md) — Refresh de Design (shadcn/ui). Sem fase de rollout isolada — aplicado dentro do trabalho das ADR-018 a 020.
+
 Decisões explicitamente pendentes (não devem ser assumidas silenciosamente em implementação futura):
 - Levantamento das consciências canalizadas distintas do acervo (ADR-011 §3) — hoje só existe o marcador genérico "consciência canalizada".
 - **Resolvido em 2026-07-15:** as 2 fontes de reconciliação (`1JIkgLfQwuJS4JAabs6MdYsh87n5Xqsn9`, `1xiWXBdza2Xi05RhmXekutYk9KrJNsWfK`) estavam bloqueadas por dois problemas reais, ambos corrigidos — ver nota de implementação na ADR-011 e [docs/N8N_FLUXOS.md](./docs/N8N_FLUXOS.md) para detalhes. Continuam com `processing_status: pending` porque o Fluxo 02 processa 1 arquivo por execução entre ~106 pendentes; devem ser pegas naturalmente pelo agendamento de 2 em 2 horas, sem ação adicional necessária.
@@ -189,6 +198,10 @@ LIVRO/  (remoto GitHub: plataforma-editorial-filosofica)
 │       ├── ADR-015.md          # PROPOSTA — publicação final (DOCX/PDF/EPUB)
 │       ├── ADR-016.md          # IMPLEMENTADA — curadoria manual como fluxo principal (editorial-ui)
 │       ├── ADR-017.md          # APROVADA — processo: planejar → ADR → aprovar → desenvolver
+│       ├── ADR-018.md          # PROPOSTA — acesso público autenticado (NextAuth + Google OAuth)
+│       ├── ADR-019.md          # PROPOSTA — insights automáticos de capítulos
+│       ├── ADR-020.md          # PROPOSTA — editor de manuscrito com preservação de blocos literais
+│       ├── ADR-021.md          # PROPOSTA — refresh de design (shadcn/ui)
 │       └── originais/          # documentos-fonte em Word (ADR 009.docx, ADR 010.docx, Arquitetura da Plataforma Editorial.docx) — versões originais que deram origem aos .md acima
 ├── editorial-api/              # API oficial (Flask + Cloud SQL), deploy no Cloud Run
 │   ├── main.py
