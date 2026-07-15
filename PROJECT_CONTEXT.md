@@ -99,12 +99,12 @@ Endpoints implementados (`editorial-api/main.py`):
 - [ADR-011](./docs/adr/ADR-011.md) — Fundação de Dados da Camada Editorial. Normaliza conceitos (`editorial.concepts`/`segment_concepts`/`card_concepts`), vocabulário controlado para `segment_type` (`editorial.segment_types`) e para quem fala (`editorial.speakers`), trilha de auditoria de reprocessamento (`segment_revisions`/`card_revisions`). Aplicada em produção em 2026-07-14 — ver nota de implementação na própria ADR, incluindo remoção de um schema órfão não documentado (`concepts`/`card_concepts`/`concept_relationships`/`processing_index` de uma tentativa anterior via ChatGPT, vazio e desconectado da API).
 - [ADR-012](./docs/adr/ADR-012.md) — Mapa Filosófico Automatizado e Recuperação Semântica. **Implementada em 2026-07-14/15**, incluindo busca semântica: `editorial.concept_relations` (595 relações calculadas), `importance_score`/`importance_level` reais em conceitos e fichas (4 "pilar", 16 "forte", 42 "apoio", 147 "emergente" — antes tudo 0/"emergente"), e `POST /search` com embeddings OpenAI (`text-embedding-3-small`) — testado retornando conteúdo relevante mesmo sem correspondência exata de palavra-chave. Ver nota de implementação na ADR.
 - [ADR-013](./docs/adr/ADR-013.md) — Projetos de Livro e Montagem de Capítulos. **Implementada em 2026-07-15.** `book_projects`/`chapters`/`chapter_sources`/`chapter_revisions` no ar. `POST /chapters/<id>/propose` monta capítulos algoritmicamente (sem LLM) a partir do escopo temático — canalizações e demais segmentos sempre como blocos literais intocáveis, fichas como material de apoio, dedup por similaridade de embedding. Gate de aprovação humana (`draft` → `assembled`) testado de ponta a ponta em produção. Ver nota de implementação na ADR.
+- [ADR-014](./docs/adr/ADR-014.md) — Revisão Editorial e Consolidação. **Implementada em 2026-07-15.** `GET /book-projects/<id>/duplicate-report` (sobreposição entre capítulos via embeddings) e `GET /chapters/<id>/consolidation-check` (fonte duplicada no mesmo capítulo, terminologia não-canônica, possível paráfrase de bloco literal) — ambos só sinalizam, nunca corrigem. `POST /chapters/<id>/review` exige `reviewed_by` humano (`assembled` → `reviewed`). Ver nota de implementação na ADR.
 
 ## Roadmap de ADRs propostas (2026-07-14)
 
-Plano para viabilizar a geração de capítulos de livro com qualidade, a partir de um parecer técnico sobre o estado do projeto. Status "Proposta" — ainda não implementadas.
+Plano para viabilizar a geração de capítulos de livro com qualidade, a partir de um parecer técnico sobre o estado do projeto. Status "Proposta" — ainda não implementada.
 
-- [ADR-014](./docs/adr/ADR-014.md) — Revisão Editorial e Consolidação. Detecção de duplicidade entre capítulos, checklist de consistência terminológica, aprovação humana obrigatória.
 - [ADR-015](./docs/adr/ADR-015.md) — Publicação Final. Exportação DOCX (primário) → PDF/EPUB derivados, metadados e manifesto de rastreabilidade.
 
 Decisões explicitamente pendentes (não devem ser assumidas silenciosamente em implementação futura):
@@ -152,7 +152,7 @@ Livro
 
 ## Próxima evolução
 
-Ver seção "Roadmap de ADRs propostas" acima. Próximo passo de implementação: ADR-014 (Revisão Editorial e Consolidação), agora que ADR-011, ADR-012 e ADR-013 estão aplicadas — já é possível montar rascunhos de capítulo de ponta a ponta.
+Ver seção "Roadmap de ADRs propostas" acima. Próximo passo de implementação: ADR-015 (Publicação Final) — última etapa do pipeline Vídeo → Livro definido na ADR-010. Com ADR-011 a 014 aplicadas, a plataforma já vai de vídeo bruto a capítulo revisado; só falta a exportação para os formatos finais.
 
 ## Estrutura do repositório
 
@@ -168,7 +168,7 @@ plataforma-editorial-filosofica/
 │       ├── ADR-011.md          # IMPLEMENTADA — normalização de conceitos, vocabulários controlados, auditoria
 │       ├── ADR-012.md          # IMPLEMENTADA — Mapa Filosófico automatizado + busca semântica (embeddings OpenAI)
 │       ├── ADR-013.md          # IMPLEMENTADA — Projetos de Livro e montagem de capítulos
-│       ├── ADR-014.md          # PROPOSTA — revisão editorial e consolidação
+│       ├── ADR-014.md          # IMPLEMENTADA — revisão editorial e consolidação
 │       └── ADR-015.md          # PROPOSTA — publicação final (DOCX/PDF/EPUB)
 ├── editorial-api/              # API oficial (Flask + Cloud SQL), deploy no Cloud Run
 │   ├── main.py
@@ -180,6 +180,7 @@ plataforma-editorial-filosofica/
 │   ├── migration_adr_012.sql
 │   ├── migration_adr_012_embeddings.sql
 │   ├── migration_adr_013.sql
+│   ├── migration_adr_014.sql
 │   └── DEPLOY_ADR-011.md
 ├── ai-services/                 # Serviço RODANDO em produção (Cloud Run), mas código-fonte não versionado em lugar nenhum — ver docs/GCP_INFRAESTRUTURA.md.
 └── n8n-workflows/                # PLACEHOLDER — exports JSON dos fluxos 01/02/03. Ainda não exportados do n8n Cloud.

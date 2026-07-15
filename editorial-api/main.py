@@ -1021,6 +1021,169 @@ def approve_chapter(chapter_id):
     return jsonify(result)
 
 
+@app.get("/chapters/<chapter_id>/consolidation-check")
+@require_api_key
+def consolidation_check(chapter_id):
+    """Checklist de consolidação (ADR-014 §2) — sempre um relatório informativo,
+    nunca bloqueia nada sozinho. A decisão de avançar para 'reviewed' é sempre humana."""
+    paraphrase_threshold = float(request.args.get("paraphrase_threshold", 0.85))
+
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            chapter = build_chapter_detail(cursor, chapter_id)
+            if not chapter:
+                return jsonify({"error": "Chapter not found"}), 404
+
+            sources = chapter["sources"]
+            issues = []
+
+            # 1. a mesma fonte usada mais de uma vez dentro do proprio capitulo
+            seen = {}
+            for source in sources:
+                if source["segment_id"]:
+                    key = ("segment", source["segment_id"])
+                elif source["knowledge_card_id"]:
+                    key = ("card", source["knowledge_card_id"])
+                else:
+                    continue
+                seen.setdefault(key, []).append(source["id"])
+            for (kind, item_id), ids in seen.items():
+                if len(ids) > 1:
+                    issues.append({
+                        "type": "duplicate_source_in_chapter",
+                        "detail": f"{kind} {item_id} aparece {len(ids)} vezes neste capítulo",
+                        "chapter_source_ids": [str(i) for i in ids],
+                    })
+
+            # 2. terminologia nao-canonica em texto de transicao escrito manualmente
+            cursor.execute("""
+                SELECT canonical_name, aliases FROM editorial.concepts
+                WHERE jsonb_array_length(aliases) > 0
+            """)
+            concepts_with_aliases = cursor.fetchall()
+            for source in sources:
+                if source["inclusion_type"] == "transition_context" and source["content"]:
+                    text_lower = source["content"].lower()
+                    for concept in concepts_with_aliases:
+                        canonical_lower = concept["canonical_name"].lower()
+                        for alias in concept["aliases"]:
+                            if alias.lower() in text_lower and canonical_lower not in text_lower:
+                                issues.append({
+                                    "type": "non_canonical_terminology",
+                                    "chapter_source_id": str(source["id"]),
+                                    "alias_found": alias,
+                                    "canonical_name": concept["canonical_name"],
+                                })
+
+            # 3. possivel parafrase de bloco literal adjacente
+            for index, source in enumerate(sources):
+                if source["inclusion_type"] != "transition_context" or not source["content"]:
+                    continue
+                embedding = generate_embedding(source["content"])
+                if embedding is None:
+                    continue
+                neighbors = [sources[index - 1] if index > 0 else None,
+                             sources[index + 1] if index + 1 < len(sources) else None]
+                for neighbor in neighbors:
+                    if not neighbor or neighbor["inclusion_type"] != "literal_segment" or not neighbor["segment_id"]:
+                        continue
+                    cursor.execute("""
+                        SELECT 1 - (embedding <=> %s::vector) AS similarity
+                        FROM editorial.content_segments
+                        WHERE id = %s AND embedding IS NOT NULL
+                    """, (embedding, neighbor["segment_id"]))
+                    row = cursor.fetchone()
+                    if row and row["similarity"] >= paraphrase_threshold:
+                        issues.append({
+                            "type": "possible_paraphrase",
+                            "chapter_source_id": str(source["id"]),
+                            "adjacent_segment_id": str(neighbor["segment_id"]),
+                            "similarity": row["similarity"],
+                        })
+
+    return jsonify({
+        "chapter_id": chapter_id,
+        "issues": issues,
+        "note": (
+            "Canalização cortada no meio entre dois chapter_sources não é verificado "
+            "aqui porque é estruturalmente impossível: cada linha de chapter_sources "
+            "referencia um segmento inteiro, nunca um trecho parcial."
+        ),
+    })
+
+
+@app.get("/book-projects/<book_project_id>/duplicate-report")
+@require_api_key
+def duplicate_report(book_project_id):
+    """Detecção de duplicidade entre capítulos do mesmo projeto (ADR-014 §1).
+    Só sinaliza — nunca remove ou realoca nada automaticamente."""
+    threshold = float(request.args.get("threshold", 0.90))
+
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT id FROM editorial.book_projects WHERE id = %s", (book_project_id,))
+            if not cursor.fetchone():
+                return jsonify({"error": "Book project not found"}), 404
+
+            cursor.execute("""
+                WITH proj_sources AS (
+                    SELECT
+                        cs.id, cs.chapter_id, cs.segment_id, cs.knowledge_card_id,
+                        COALESCE(seg.embedding, card.embedding) AS embedding,
+                        COALESCE(seg.title, card.title) AS title
+                    FROM editorial.chapter_sources cs
+                    JOIN editorial.chapters ch ON ch.id = cs.chapter_id
+                    LEFT JOIN editorial.content_segments seg ON seg.id = cs.segment_id
+                    LEFT JOIN editorial.knowledge_cards card ON card.id = cs.knowledge_card_id
+                    WHERE ch.book_project_id = %(book_project_id)s
+                )
+                SELECT
+                    a.chapter_id AS chapter_a_id, b.chapter_id AS chapter_b_id,
+                    a.id AS source_a_id, b.id AS source_b_id,
+                    a.title AS title_a, b.title AS title_b,
+                    1 - (a.embedding <=> b.embedding) AS similarity
+                FROM proj_sources a
+                JOIN proj_sources b ON a.id < b.id AND a.chapter_id <> b.chapter_id
+                WHERE a.embedding IS NOT NULL AND b.embedding IS NOT NULL
+                  AND 1 - (a.embedding <=> b.embedding) >= %(threshold)s
+                ORDER BY similarity DESC
+            """, {"book_project_id": book_project_id, "threshold": threshold})
+            conflicts = cursor.fetchall()
+
+    return jsonify({"book_project_id": book_project_id, "threshold": threshold, "conflicts": conflicts})
+
+
+@app.post("/chapters/<chapter_id>/review")
+@require_api_key
+def review_chapter(chapter_id):
+    """Gate de aprovação humana (ADR-014 §3): só avança de 'assembled' para 'reviewed'
+    com reviewed_by preenchido. Nunca deve ser chamado por um processo automático."""
+    payload = request.get_json(silent=True) or {}
+    reviewed_by = payload.get("reviewed_by")
+    if not reviewed_by:
+        return jsonify({"error": "Missing required fields", "fields": ["reviewed_by"]}), 400
+
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT * FROM editorial.chapters WHERE id = %s", (chapter_id,))
+            chapter = cursor.fetchone()
+            if not chapter:
+                return jsonify({"error": "Chapter not found"}), 404
+            if chapter["status"] != "assembled":
+                return jsonify({
+                    "error": "Chapter must be 'assembled' before it can be reviewed",
+                    "status": chapter["status"],
+                }), 400
+
+            cursor.execute("""
+                UPDATE editorial.chapters
+                SET status = 'reviewed', reviewed_by = %s, reviewed_at = NOW(), updated_at = NOW()
+                WHERE id = %s
+            """, (reviewed_by, chapter_id))
+            result = build_chapter_detail(cursor, chapter_id)
+    return jsonify(result)
+
+
 @app.errorhandler(Exception)
 def handle_unexpected_error(error):
     app.logger.exception("Unexpected error")
