@@ -1,5 +1,7 @@
 import hmac
+import math
 import os
+import uuid
 from datetime import datetime, timezone
 from functools import wraps
 
@@ -69,6 +71,84 @@ def strip_embedding(row):
     if row is not None:
         row.pop("embedding", None)
     return row
+
+
+def cosine_similarity(a, b):
+    """Similaridade de cosseno entre dois embeddings (ADR-013 §3 — dedup de candidatos)."""
+    if a is None or b is None:
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def json_safe(value):
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
+
+
+def serialize_rows(rows):
+    return [{key: json_safe(value) for key, value in dict(row).items()} for row in rows]
+
+
+def build_chapter_detail(cursor, chapter_id):
+    """Monta o capítulo com o texto das fontes resolvido (ADR-013)."""
+    cursor.execute("""
+        SELECT ch.*, bp.title AS book_project_title
+        FROM editorial.chapters ch
+        JOIN editorial.book_projects bp ON bp.id = ch.book_project_id
+        WHERE ch.id = %s
+    """, (chapter_id,))
+    chapter = cursor.fetchone()
+    if not chapter:
+        return None
+
+    cursor.execute("""
+        SELECT
+            cs.id, cs.source_order, cs.inclusion_type, cs.content,
+            cs.segment_id, cs.knowledge_card_id,
+            seg.title AS segment_title, seg.full_text AS segment_full_text,
+            seg.segment_type, seg.is_channeled,
+            card.title AS card_title, card.summary AS card_summary
+        FROM editorial.chapter_sources cs
+        LEFT JOIN editorial.content_segments seg ON seg.id = cs.segment_id
+        LEFT JOIN editorial.knowledge_cards card ON card.id = cs.knowledge_card_id
+        WHERE cs.chapter_id = %s
+        ORDER BY cs.source_order
+    """, (chapter_id,))
+    chapter["sources"] = cursor.fetchall()
+    return chapter
+
+
+def _fetch_chapter_sources(cursor, chapter_id):
+    cursor.execute(
+        "SELECT * FROM editorial.chapter_sources WHERE chapter_id = %s ORDER BY source_order",
+        (chapter_id,),
+    )
+    return cursor.fetchall()
+
+
+def snapshot_chapter_revision(cursor, chapter, existing_sources):
+    """Grava a revisão do capítulo antes de suas fontes serem substituídas (ADR-013 §4)."""
+    if not existing_sources:
+        return
+    cursor.execute("""
+        INSERT INTO editorial.chapter_revisions (chapter_id, title, thematic_scope, status, sources_snapshot)
+        VALUES (%(chapter_id)s, %(title)s, %(thematic_scope)s, %(status)s, %(sources_snapshot)s)
+    """, {
+        "chapter_id": chapter["id"],
+        "title": chapter["title"],
+        "thematic_scope": Json(chapter["thematic_scope"]),
+        "status": chapter["status"],
+        "sources_snapshot": Json(serialize_rows(existing_sources)),
+    })
+    cursor.execute("DELETE FROM editorial.chapter_sources WHERE chapter_id = %s", (chapter["id"],))
 
 
 def sync_concepts(cursor, concept_texts, segment_id=None, card_id=None):
@@ -676,6 +756,269 @@ def semantic_search():
 
     results.sort(key=lambda item: item["similarity"], reverse=True)
     return jsonify(results[:limit])
+
+
+@app.post("/book-projects")
+@require_api_key
+def create_book_project():
+    payload = request.get_json(silent=True) or {}
+    if not payload.get("title"):
+        return jsonify({"error": "Missing required fields", "fields": ["title"]}), 400
+
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                INSERT INTO editorial.book_projects (title, description)
+                VALUES (%s, %s)
+                RETURNING *
+            """, (payload["title"], payload.get("description")))
+            row = cursor.fetchone()
+    return jsonify(row), 201
+
+
+@app.get("/book-projects")
+@require_api_key
+def list_book_projects():
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                SELECT bp.*, count(ch.id) AS chapter_count
+                FROM editorial.book_projects bp
+                LEFT JOIN editorial.chapters ch ON ch.book_project_id = bp.id
+                GROUP BY bp.id
+                ORDER BY bp.created_at DESC
+            """)
+            rows = cursor.fetchall()
+    return jsonify(rows)
+
+
+@app.get("/book-projects/<book_project_id>")
+@require_api_key
+def get_book_project(book_project_id):
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT * FROM editorial.book_projects WHERE id = %s", (book_project_id,))
+            project = cursor.fetchone()
+            if not project:
+                return jsonify({"error": "Book project not found"}), 404
+
+            cursor.execute("""
+                SELECT ch.id, ch.chapter_order, ch.title, ch.status, ch.thematic_scope,
+                       count(cs.id) AS source_count
+                FROM editorial.chapters ch
+                LEFT JOIN editorial.chapter_sources cs ON cs.chapter_id = ch.id
+                WHERE ch.book_project_id = %s
+                GROUP BY ch.id
+                ORDER BY ch.chapter_order
+            """, (book_project_id,))
+            project["chapters"] = cursor.fetchall()
+    return jsonify(project)
+
+
+@app.post("/book-projects/<book_project_id>/chapters")
+@require_api_key
+def create_chapter(book_project_id):
+    payload = request.get_json(silent=True) or {}
+    required = ["title", "chapter_order"]
+    missing = [field for field in required if payload.get(field) in (None, "")]
+    if missing:
+        return jsonify({"error": "Missing required fields", "fields": missing}), 400
+
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT id FROM editorial.book_projects WHERE id = %s", (book_project_id,))
+            if not cursor.fetchone():
+                return jsonify({"error": "Book project not found"}), 404
+
+            concept_ids = []
+            unknown_concepts = []
+            for name in payload.get("thematic_scope", []):
+                cursor.execute(
+                    f"SELECT id FROM editorial.concepts WHERE normalized_key = {NORMALIZE_CONCEPT_KEY_SQL}",
+                    (name,),
+                )
+                row = cursor.fetchone()
+                if row:
+                    concept_ids.append(str(row["id"]))
+                else:
+                    unknown_concepts.append(name)
+            if unknown_concepts:
+                return jsonify({"error": "Unknown concepts", "concepts": unknown_concepts}), 400
+
+            cursor.execute("""
+                INSERT INTO editorial.chapters (book_project_id, chapter_order, title, thematic_scope)
+                VALUES (%s, %s, %s, %s)
+                RETURNING *
+            """, (book_project_id, payload["chapter_order"], payload["title"], Json(concept_ids)))
+            chapter = cursor.fetchone()
+    return jsonify(chapter), 201
+
+
+@app.get("/chapters/<chapter_id>")
+@require_api_key
+def get_chapter(chapter_id):
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            chapter = build_chapter_detail(cursor, chapter_id)
+    if not chapter:
+        return jsonify({"error": "Chapter not found"}), 404
+    return jsonify(chapter)
+
+
+@app.post("/chapters/<chapter_id>/propose")
+@require_api_key
+def propose_chapter_sources(chapter_id):
+    """Módulo 06 (ADR-013 §3): gera uma PROPOSTA de montagem, não uma versão final.
+    Recupera candidatos por conceito (Mapa Filosófico), ranqueia e remove redundância
+    por similaridade de embedding. Sempre grava como proposta — o capítulo permanece em
+    'draft' até aprovação humana explícita via POST /chapters/<id>/approve."""
+    payload = request.get_json(silent=True) or {}
+    min_importance = int(payload.get("min_importance", 25))
+    limit = min(int(payload.get("limit", 20)), 50)
+    similarity_threshold = float(payload.get("similarity_threshold", 0.92))
+
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT * FROM editorial.chapters WHERE id = %s", (chapter_id,))
+            chapter = cursor.fetchone()
+            if not chapter:
+                return jsonify({"error": "Chapter not found"}), 404
+
+            concept_ids = chapter["thematic_scope"] or []
+            if not concept_ids:
+                return jsonify({"error": "Chapter has empty thematic_scope"}), 400
+
+            cursor.execute("""
+                SELECT DISTINCT cs.id AS segment_id, cs.is_channeled, cs.editorial_relevance, cs.embedding
+                FROM editorial.content_segments cs
+                JOIN editorial.segment_concepts sc ON sc.segment_id = cs.id
+                WHERE sc.concept_id = ANY(%s::uuid[])
+                ORDER BY cs.is_channeled DESC, cs.editorial_relevance DESC
+                LIMIT %s
+            """, (concept_ids, limit * 2))
+            segment_candidates = cursor.fetchall()
+
+            cursor.execute("""
+                SELECT DISTINCT kc.id AS card_id, kc.importance_score, kc.embedding
+                FROM editorial.knowledge_cards kc
+                JOIN editorial.card_concepts cc ON cc.card_id = kc.id
+                WHERE cc.concept_id = ANY(%s::uuid[]) AND kc.importance_score >= %s
+                ORDER BY kc.importance_score DESC
+                LIMIT %s
+            """, (concept_ids, min_importance, limit * 2))
+            card_candidates = cursor.fetchall()
+
+            kept = []
+            kept_embeddings = []
+
+            def try_keep(kind, item_id, embedding):
+                if len(kept) >= limit:
+                    return
+                if embedding is not None and any(
+                    cosine_similarity(embedding, other) >= similarity_threshold for other in kept_embeddings
+                ):
+                    return
+                kept.append((kind, item_id))
+                kept_embeddings.append(embedding)
+
+            for row in segment_candidates:
+                try_keep("segment", row["segment_id"], row["embedding"])
+            for row in card_candidates:
+                try_keep("card", row["card_id"], row["embedding"])
+
+            snapshot_chapter_revision(
+                cursor, chapter,
+                _fetch_chapter_sources(cursor, chapter_id),
+            )
+
+            for order, (kind, item_id) in enumerate(kept, start=1):
+                if kind == "segment":
+                    cursor.execute("""
+                        INSERT INTO editorial.chapter_sources (chapter_id, segment_id, source_order, inclusion_type)
+                        VALUES (%s, %s, %s, 'literal_segment')
+                    """, (chapter_id, item_id, order))
+                else:
+                    cursor.execute("""
+                        INSERT INTO editorial.chapter_sources
+                            (chapter_id, knowledge_card_id, source_order, inclusion_type)
+                        VALUES (%s, %s, %s, 'card_synthesis')
+                    """, (chapter_id, item_id, order))
+
+            cursor.execute("UPDATE editorial.chapters SET updated_at = NOW() WHERE id = %s", (chapter_id,))
+            result = build_chapter_detail(cursor, chapter_id)
+    return jsonify(result)
+
+
+@app.put("/chapters/<chapter_id>/sources")
+@require_api_key
+def set_chapter_sources(chapter_id):
+    """Substituição manual das fontes de um capítulo — para quando um humano quer
+    ajustar/curar a proposta gerada por /propose antes de aprovar."""
+    payload = request.get_json(silent=True) or {}
+    sources = payload.get("sources")
+    if not isinstance(sources, list) or not sources:
+        return jsonify({"error": "Missing required field", "fields": ["sources"]}), 400
+
+    for item in sources:
+        inclusion_type = item.get("inclusion_type")
+        if inclusion_type not in ("literal_segment", "card_synthesis", "transition_context"):
+            return jsonify({"error": "Invalid inclusion_type", "value": inclusion_type}), 400
+        if inclusion_type == "literal_segment" and not item.get("segment_id"):
+            return jsonify({"error": "literal_segment requires segment_id"}), 400
+        if inclusion_type == "card_synthesis" and not item.get("knowledge_card_id"):
+            return jsonify({"error": "card_synthesis requires knowledge_card_id"}), 400
+
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT * FROM editorial.chapters WHERE id = %s", (chapter_id,))
+            chapter = cursor.fetchone()
+            if not chapter:
+                return jsonify({"error": "Chapter not found"}), 404
+
+            snapshot_chapter_revision(
+                cursor, chapter,
+                _fetch_chapter_sources(cursor, chapter_id),
+            )
+
+            for order, item in enumerate(sources, start=1):
+                cursor.execute("""
+                    INSERT INTO editorial.chapter_sources
+                        (chapter_id, segment_id, knowledge_card_id, source_order, inclusion_type, content)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (
+                    chapter_id, item.get("segment_id"), item.get("knowledge_card_id"),
+                    order, item["inclusion_type"], item.get("content"),
+                ))
+
+            cursor.execute("UPDATE editorial.chapters SET updated_at = NOW() WHERE id = %s", (chapter_id,))
+            result = build_chapter_detail(cursor, chapter_id)
+    return jsonify(result)
+
+
+@app.post("/chapters/<chapter_id>/approve")
+@require_api_key
+def approve_chapter(chapter_id):
+    """Gate de aprovação humana (ADR-013 §3.4): só um humano avança um capítulo de
+    'draft' para 'assembled'. Nunca automatizar esta chamada."""
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT * FROM editorial.chapters WHERE id = %s", (chapter_id,))
+            chapter = cursor.fetchone()
+            if not chapter:
+                return jsonify({"error": "Chapter not found"}), 404
+            if chapter["status"] != "draft":
+                return jsonify({"error": "Chapter is not in draft status", "status": chapter["status"]}), 400
+
+            cursor.execute("SELECT count(*) AS n FROM editorial.chapter_sources WHERE chapter_id = %s", (chapter_id,))
+            if cursor.fetchone()["n"] == 0:
+                return jsonify({"error": "Chapter has no sources to approve"}), 400
+
+            cursor.execute("""
+                UPDATE editorial.chapters SET status = 'assembled', updated_at = NOW()
+                WHERE id = %s
+            """, (chapter_id,))
+            result = build_chapter_detail(cursor, chapter_id)
+    return jsonify(result)
 
 
 @app.errorhandler(Exception)
