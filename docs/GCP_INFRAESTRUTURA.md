@@ -6,7 +6,7 @@ Este documento registra o que existe de fato no projeto GCP `thiago-ai-platform`
 
 ## Cloud Run (região `southamerica-east1`)
 
-Três serviços rodando — só um está documentado no restante do repositório.
+Quatro serviços rodando — dois fazem parte desta plataforma.
 
 ### `editorial-api` — documentado (ADR-009/010/011)
 - URL: `https://editorial-api-tugu5b252q-rj.a.run.app`
@@ -14,6 +14,13 @@ Três serviços rodando — só um está documentado no restante do repositório
 - Service account: `editorial-api@thiago-ai-platform.iam.gserviceaccount.com` — única com `roles/cloudsql.client` a nível de projeto.
 - Acesso: público, protegido por chave de aplicação (`X-Service-Api-Key`, secret `editorial-api-key`).
 - Conecta no Cloud SQL via socket `/cloudsql/...` (Unix socket, sem proxy).
+
+### `editorial-ui` — documentado (ADR-016, implantado em 2026-07-15)
+- URL: `https://editorial-ui-592824114603.southamerica-east1.run.app`
+- Código-fonte: [`editorial-ui/`](../editorial-ui/) neste repositório.
+- Service account: `editorial-ui@thiago-ai-platform.iam.gserviceaccount.com` — sem `roles/cloudsql.client` (não acessa o banco; fala só com a `editorial-api`); tem `secretmanager.secretAccessor` no secret reaproveitado `editorial-api-key`.
+- Acesso: `--no-allow-unauthenticated` — `roles/run.invoker` restrito a `contato@banhoseterapias.com`, mesmo padrão do `arquitetura-planner`. Acesso via `gcloud run services proxy editorial-ui --region southamerica-east1 --project thiago-ai-platform`.
+- Chama a `editorial-api` via HTTPS público, com a mesma chave `X-Service-Api-Key` lida do secret acima.
 
 ### `ai-services` — existe e está rodando; **código-fonte não está versionado em lugar nenhum**
 - URL: `https://ai-services-tugu5b252q-rj.a.run.app`
@@ -71,13 +78,14 @@ Três serviços rodando — só um está documentado no restante do repositório
 
 ## Artifact Registry
 
-- Um único repositório Docker: `cloud-run-source-deploy` (`southamerica-east1`) — criado automaticamente pelo padrão `gcloud run deploy --source .`. Contém as imagens dos 3 serviços acima.
+- Um único repositório Docker: `cloud-run-source-deploy` (`southamerica-east1`) — criado automaticamente pelo padrão `gcloud run deploy --source .`. Contém as imagens dos 4 serviços acima.
 
 ## Service Accounts
 
 | Service account | Usado por | Papel notável |
 |---|---|---|
 | `editorial-api@...` | Cloud Run `editorial-api` | `roles/cloudsql.client` (única com acesso ao Cloud SQL) |
+| `editorial-ui@...` | Cloud Run `editorial-ui` | `secretmanager.secretAccessor` em `editorial-api-key`; sem acesso ao Cloud SQL |
 | `ai-services@...` | Cloud Run `ai-services` | sem acesso ao Cloud SQL |
 | `arquitetura-planner@...` | Cloud Run `arquitetura-planner` | sem acesso ao Cloud SQL |
 | `...-compute@developer.gserviceaccount.com` | conta padrão do Compute Engine | `roles/run.builder` (usada em builds `gcloud run deploy --source`) |

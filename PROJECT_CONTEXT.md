@@ -74,6 +74,14 @@ Endpoints implementados (`editorial-api/main.py`):
 - `POST /knowledge-cards`
 - `GET /knowledge-cards`
 
+### Interface de Curadoria — Cloud Run (`editorial-ui`)
+
+- Nome do serviço: `editorial-ui`
+- URL: `https://editorial-ui-592824114603.southamerica-east1.run.app`
+- Autenticação: `--no-allow-unauthenticated`, IAM `roles/run.invoker` restrito a `contato@banhoseterapias.com` — mesmo padrão do `arquitetura-planner`. Acesso via `gcloud run services proxy editorial-ui --region southamerica-east1 --project thiago-ai-platform`.
+- Código-fonte: [`editorial-ui/`](./editorial-ui/) — Next.js 16 (App Router), fala apenas com a `editorial-api` (nunca com Postgres/OpenAI diretamente), credencial `X-Service-Api-Key` mantida server-only.
+- Responsabilidade: navegar o acervo (busca semântica, filtro por conceito/tema) e montar capítulos manualmente — ver [ADR-016](./docs/adr/ADR-016.md). `POST /chapters/<id>/propose` é exposto como atalho opcional, não como fluxo principal.
+
 ## Fluxos existentes
 
 ### Fluxo 01 — Ingestão
@@ -100,6 +108,7 @@ Endpoints implementados (`editorial-api/main.py`):
 - [ADR-012](./docs/adr/ADR-012.md) — Mapa Filosófico Automatizado e Recuperação Semântica. **Implementada em 2026-07-14/15**, incluindo busca semântica: `editorial.concept_relations` (595 relações calculadas), `importance_score`/`importance_level` reais em conceitos e fichas (4 "pilar", 16 "forte", 42 "apoio", 147 "emergente" — antes tudo 0/"emergente"), e `POST /search` com embeddings OpenAI (`text-embedding-3-small`) — testado retornando conteúdo relevante mesmo sem correspondência exata de palavra-chave. Ver nota de implementação na ADR.
 - [ADR-013](./docs/adr/ADR-013.md) — Projetos de Livro e Montagem de Capítulos. **Implementada em 2026-07-15.** `book_projects`/`chapters`/`chapter_sources`/`chapter_revisions` no ar. `POST /chapters/<id>/propose` monta capítulos algoritmicamente (sem LLM) a partir do escopo temático — canalizações e demais segmentos sempre como blocos literais intocáveis, fichas como material de apoio, dedup por similaridade de embedding. Gate de aprovação humana (`draft` → `assembled`) testado de ponta a ponta em produção. Ver nota de implementação na ADR.
 - [ADR-014](./docs/adr/ADR-014.md) — Revisão Editorial e Consolidação. **Implementada em 2026-07-15.** `GET /book-projects/<id>/duplicate-report` (sobreposição entre capítulos via embeddings) e `GET /chapters/<id>/consolidation-check` (fonte duplicada no mesmo capítulo, terminologia não-canônica, possível paráfrase de bloco literal) — ambos só sinalizam, nunca corrigem. `POST /chapters/<id>/review` exige `reviewed_by` humano (`assembled` → `reviewed`). Ver nota de implementação na ADR.
+- [ADR-016](./docs/adr/ADR-016.md) — Curadoria Manual como Fluxo Principal. **Implementada em 2026-07-15.** Novo serviço `editorial-ui` (Next.js, Cloud Run, IAM) para navegar o acervo e montar capítulos manualmente — inverte a ênfase da ADR-013 (`/propose` deixa de ser o caminho natural e passa a ser atalho opcional). Nenhuma mudança de schema/endpoint. Ver nota de implementação na ADR.
 
 ## Roadmap de ADRs propostas (2026-07-14)
 
@@ -149,10 +158,11 @@ Livro
 - Cloud SQL operacional.
 - Editorial API operacional.
 - Código do `editorial-api` versionado neste repositório em 2026-07-14 (antes vivia apenas em `~/Projects/editorial-api`, sem git).
+- Interface de curadoria (`editorial-ui`) implantada e operacional em 2026-07-15 — ver ADR-016.
 
 ## Próxima evolução
 
-Ver seção "Roadmap de ADRs propostas" acima. Próximo passo de implementação: ADR-015 (Publicação Final) — última etapa do pipeline Vídeo → Livro definido na ADR-010. Com ADR-011 a 014 aplicadas, a plataforma já vai de vídeo bruto a capítulo revisado; só falta a exportação para os formatos finais.
+Ver seção "Roadmap de ADRs propostas" acima. Próximo passo de implementação: ADR-015 (Publicação Final) — última etapa do pipeline Vídeo → Livro definido na ADR-010. Com ADR-011 a 014 aplicadas e a curadoria manual (ADR-016) disponível via `editorial-ui`, a plataforma já vai de vídeo bruto a capítulo revisado e navegável por humano; só falta a exportação para os formatos finais.
 
 ## Estrutura do repositório
 
@@ -172,6 +182,7 @@ LIVRO/  (remoto GitHub: plataforma-editorial-filosofica)
 │       ├── ADR-013.md          # IMPLEMENTADA — Projetos de Livro e montagem de capítulos
 │       ├── ADR-014.md          # IMPLEMENTADA — revisão editorial e consolidação
 │       ├── ADR-015.md          # PROPOSTA — publicação final (DOCX/PDF/EPUB)
+│       ├── ADR-016.md          # IMPLEMENTADA — curadoria manual como fluxo principal (editorial-ui)
 │       └── originais/          # documentos-fonte em Word (ADR 009.docx, ADR 010.docx, Arquitetura da Plataforma Editorial.docx) — versões originais que deram origem aos .md acima
 ├── editorial-api/              # API oficial (Flask + Cloud SQL), deploy no Cloud Run
 │   ├── main.py
@@ -185,6 +196,12 @@ LIVRO/  (remoto GitHub: plataforma-editorial-filosofica)
 │   ├── migration_adr_013.sql
 │   ├── migration_adr_014.sql
 │   └── DEPLOY_ADR-011.md
+├── editorial-ui/                # Interface de curadoria (Next.js), deploy no Cloud Run — ver ADR-016
+│   ├── app/                     # rotas: /, /projects/[projectId], /projects/[projectId]/chapters/[chapterId], /projects/[projectId]/duplicate-report
+│   ├── lib/editorial-api.ts     # cliente server-only para a editorial-api
+│   ├── lib/actions.ts           # Server Actions (criar projeto/capítulo, salvar fontes, aprovar, revisar)
+│   ├── components/
+│   └── Dockerfile
 ├── ai-services/                 # Serviço RODANDO em produção (Cloud Run), mas código-fonte não versionado em lugar nenhum — ver docs/GCP_INFRAESTRUTURA.md.
 └── n8n-workflows/                # PLACEHOLDER — exports JSON dos fluxos 01/02/03. Ainda não exportados do n8n Cloud.
 ```
