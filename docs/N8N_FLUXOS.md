@@ -75,9 +75,18 @@ Gatilhos: manual e `Todo domingo` (agendado, semanal).
 | Header Auth account | Header Auth | 1 | não identificado qual node usa — investigar se necessário |
 | S3 account | AWS S3 | 0 (nenhum uso listado) | não referenciada por nenhum node atualmente visível — possível resquício de uma abordagem anterior de armazenamento; sem risco imediato, mas vale perguntar ao autor se ainda serve para algo |
 
-## Decisões que só você pode tomar a partir daqui
+## Ações realizadas (2026-07-14, após decisão do autor)
 
-1. **O que fazer com o Fluxo 03 imediatamente:** ele volta a rodar no próximo domingo (2026-07-19). Continuar gravando só nas Data Tables do n8n (arquitetura errada, mas inofensivo) ou pausar até decidirmos a reconciliação?
-2. **Reconciliação de dados:** as 90 fichas em `Knowledge Cards` (n8n) vs. 76 em `editorial.knowledge_cards` (Postgres) — são 14 fichas que existem só no n8n? Precisam ser conferidas e, se válidas, gravadas via `POST /knowledge-cards`.
-3. **Aproveitar o que já foi calculado:** os 34 conceitos curados e as 108 relações de coocorrência em `Philosophical Map`/`Philosophical Concepts` são um bom ponto de partida para a ADR-012 — migrar via API em vez de recalcular do zero, se você concordar.
-4. **Reescrever o Fluxo 03** para gravar via Editorial API (`POST`/futuro endpoint de importância) em vez de Data Tables — isso é, na prática, o que a ADR-012 precisa entregar.
+- **Fluxo 03 despublicado (Unpublish)** no n8n Cloud — confirmado via diálogo "This will prevent all production executions to this workflow until you publish again." Não roda mais automaticamente no domingo até ser republicado.
+- **Reconciliação das fichas — achado mais preciso que o estimado inicialmente:** comparando as 91 linhas de `Knowledge Cards` (n8n) contra as 76 de `editorial.knowledge_cards` (Postgres) por `(source_file_id, theme_key, title)`, apenas **11 fichas** estavam realmente ausentes — não ~14. Todas as 11 vêm de **exatamente 2 sessões que nunca passaram pelo pipeline real**: nenhuma das duas tinha `source` no Postgres, logo também não tinha segmentos. Inserir essas 11 fichas direto via API as deixaria sem `segment_id` — órfãs, violando o princípio de rastreabilidade da ADR-010.
+- **Decisão tomada:** não copiar as 11 fichas soltas. Em vez disso, as 2 fontes foram cadastradas via `POST /sources` (`processing_status: "pending"`) para que o **Fluxo 02** — que já funciona corretamente — as processe do zero na próxima execução (segmentação + fichas com rastreabilidade completa):
+  - `1JIkgLfQwuJS4JAabs6MdYsh87n5Xqsn9` — sessão de 06/01/2026 ("manifestação e autoconhecimento")
+  - `1xiWXBdza2Xi05RhmXekutYk9KrJNsWfK` — aula de 29/12/2025 ("desenvolvimento mediúnico e meditação")
+  
+  **Ação pendente sua:** rodar o Fluxo 02 manualmente (ou aguardar o próximo ciclo de 2 horas) para que essas 2 sessões sejam processadas. As 11 fichas na Data Table do n8n continuam lá como referência, mas não foram copiadas.
+- **Conceitos/relações do n8n (34 conceitos, 108 relações) — decisão: não migrar.** Os 108 registros de `Philosophical Map` têm `cooccurrence_count=1` e `strength_score=25` em 100% das linhas — um cálculo placeholder, não diferenciado. Uma vez que a ADR-012 calcule `concept_relations` direto sobre `segment_concepts`/`card_concepts` (já normalizados pela ADR-011), o resultado será mais completo e correto do que importar esses 108 registros. Os 34 nomes de conceito ficam só como referência informal de curadoria para revisão futura, sem ação associada.
+
+## Decisões que ainda restam
+
+1. Rodar o Fluxo 02 sobre as 2 sessões recém-cadastradas (ação sua).
+2. Quando/se republicar o Fluxo 03 — só depois de reescrevê-lo para gravar via Editorial API em vez de Data Tables (isso é, na prática, o que a ADR-012 precisa entregar).

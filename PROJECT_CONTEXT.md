@@ -90,7 +90,7 @@ Endpoints implementados (`editorial-api/main.py`):
 - salvar fichas
 
 ### Fluxo 03 — Mapa Filosófico
-**Correção (2026-07-14):** não é manual — está publicado com gatilho agendado semanal ("Todo domingo"). Grava em Data Tables nativas do n8n, não na Editorial API/Cloud SQL — violação da ADR-009 ainda não corrigida. Ver [docs/N8N_FLUXOS.md](./docs/N8N_FLUXOS.md) para detalhes e decisões pendentes.
+**Correção (2026-07-14):** não era manual — estava publicado com gatilho agendado semanal ("Todo domingo"). Grava em Data Tables nativas do n8n, não na Editorial API/Cloud SQL — violação da ADR-009. **Despublicado (Unpublish) em 2026-07-14** — não roda mais até ser republicado, o que só deve acontecer após ser reescrito para gravar via Editorial API (escopo da ADR-012). Ver [docs/N8N_FLUXOS.md](./docs/N8N_FLUXOS.md).
 
 ## ADRs implementadas
 
@@ -109,8 +109,9 @@ Plano para viabilizar a geração de capítulos de livro com qualidade, a partir
 
 Decisões explicitamente pendentes (não devem ser assumidas silenciosamente em implementação futura):
 - Levantamento das consciências canalizadas distintas do acervo (ADR-011 §3) — hoje só existe o marcador genérico "consciência canalizada".
-- **Ação pendente do autor:** identificar, pausar e atualizar o fluxo do n8n que foi desenhado (via ChatGPT) para escrever no schema órfão removido durante a implementação da ADR-011. Fora do alcance desta sessão (n8n Cloud não é acessível pelas ferramentas usadas aqui).
 - Escolha do modelo de embedding para busca semântica (ADR-012 §4).
+- **Ação pendente do autor:** rodar o Fluxo 02 manualmente sobre as 2 fontes recém-cadastradas (`1JIkgLfQwuJS4JAabs6MdYsh87n5Xqsn9`, `1xiWXBdza2Xi05RhmXekutYk9KrJNsWfK`) para gerar seus segmentos e fichas com rastreabilidade completa — ver [docs/N8N_FLUXOS.md](./docs/N8N_FLUXOS.md).
+- Reescrever o Fluxo 03 para gravar via Editorial API antes de republicá-lo (hoje despublicado).
 
 ## Modelo de dados
 
@@ -188,5 +189,5 @@ plataforma-editorial-filosofica/
 
 - Código-fonte do serviço de transcrição (`ai-services`) não está versionado em lugar nenhum — o serviço está rodando em produção (confirmado 2026-07-14), mas só existe como imagem já construída no Artifact Registry, sem cópia local recuperável.
 - Workflows do n8n (Fluxos 01, 02, 03) existem apenas no n8n Cloud, sem export JSON versionado em `n8n-workflows/` (levantados via navegador em 2026-07-14, mas o export formal ainda não foi feito).
-- **Fluxo 03 grava em Data Tables do n8n em vez da Editorial API** (violação da ADR-009), com dados divergentes do Postgres real (90 vs 76 fichas, 34 vs 202 conceitos). Decisão de reconciliação pendente do autor — ver [docs/N8N_FLUXOS.md](./docs/N8N_FLUXOS.md).
+- **Fluxo 03 grava em Data Tables do n8n em vez da Editorial API** (violação da ADR-009) — despublicado em 2026-07-14 até ser reescrito para gravar via API (escopo da ADR-012). Das 11 fichas que só existiam no n8n, nenhuma foi copiada; as 2 sessões de origem foram cadastradas via `POST /sources` e aguardam processamento pelo Fluxo 02. Ver [docs/N8N_FLUXOS.md](./docs/N8N_FLUXOS.md).
 - ~~Não há migrações SQL anteriores à ADR-010 versionadas~~ — resolvido em 2026-07-14: baseline completo do schema `editorial.*` capturado via `pg_dump --schema-only` em [`editorial-api/migration_000_baseline.sql`](./editorial-api/migration_000_baseline.sql).
