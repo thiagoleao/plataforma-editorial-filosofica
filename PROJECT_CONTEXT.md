@@ -97,19 +97,19 @@ Endpoints implementados (`editorial-api/main.py`):
 - [ADR-009](./docs/adr/ADR-009.md) — Arquitetura oficial. Princípios: Cloud SQL é a fonte oficial; Editorial API centraliza regras; n8n apenas orquestra.
 - [ADR-010](./docs/adr/ADR-010.md) — Preservação de Segmentos. Toda transcrição passa por segmentação. Segmentos representam ativos editoriais. Canalizações são preservadas literalmente. Fichas sempre apontam para segmentos.
 - [ADR-011](./docs/adr/ADR-011.md) — Fundação de Dados da Camada Editorial. Normaliza conceitos (`editorial.concepts`/`segment_concepts`/`card_concepts`), vocabulário controlado para `segment_type` (`editorial.segment_types`) e para quem fala (`editorial.speakers`), trilha de auditoria de reprocessamento (`segment_revisions`/`card_revisions`). Aplicada em produção em 2026-07-14 — ver nota de implementação na própria ADR, incluindo remoção de um schema órfão não documentado (`concepts`/`card_concepts`/`concept_relationships`/`processing_index` de uma tentativa anterior via ChatGPT, vazio e desconectado da API).
+- [ADR-012](./docs/adr/ADR-012.md) — Mapa Filosófico Automatizado e Recuperação Semântica. **Parcialmente implementada em 2026-07-14:** `editorial.concept_relations` (595 relações calculadas) e `importance_score`/`importance_level` reais em conceitos e fichas (4 "pilar", 16 "forte", 42 "apoio", 147 "emergente" — antes tudo 0/"emergente"), via função determinística `recalculate_concept_graph()` disparada a cada novo segmento/ficha. A parte de busca semântica (embeddings/pgvector) segue proposta — ver nota de implementação na ADR.
 
 ## Roadmap de ADRs propostas (2026-07-14)
 
 Plano para viabilizar a geração de capítulos de livro com qualidade, a partir de um parecer técnico sobre o estado do projeto. Status "Proposta" — ainda não implementadas.
 
-- [ADR-012](./docs/adr/ADR-012.md) — Mapa Filosófico Automatizado e Recuperação Semântica. Automatiza o Módulo 04 (hoje manual): coocorrência de conceitos, cálculo determinístico de `importance_score`/`importance_level` (hoje 0/"emergente" para as 76 fichas existentes — nunca foi implementado), e busca semântica via embeddings (pgvector) para suprir a limitação de busca só por palavra-chave.
 - [ADR-013](./docs/adr/ADR-013.md) — Projetos de Livro e Montagem de Capítulos. Introduz `book_projects`/`chapters`/`chapter_sources`. Define a regra central: canalizações sempre entram como blocos literais intocáveis; fichas alimentam apenas texto de transição. Montagem é sempre proposta, com aprovação humana antes de avançar.
 - [ADR-014](./docs/adr/ADR-014.md) — Revisão Editorial e Consolidação. Detecção de duplicidade entre capítulos, checklist de consistência terminológica, aprovação humana obrigatória.
 - [ADR-015](./docs/adr/ADR-015.md) — Publicação Final. Exportação DOCX (primário) → PDF/EPUB derivados, metadados e manifesto de rastreabilidade.
 
 Decisões explicitamente pendentes (não devem ser assumidas silenciosamente em implementação futura):
 - Levantamento das consciências canalizadas distintas do acervo (ADR-011 §3) — hoje só existe o marcador genérico "consciência canalizada".
-- Escolha do modelo de embedding para busca semântica (ADR-012 §4).
+- Escolha do modelo de embedding para busca semântica (ADR-012 §4-5, ainda não implementado).
 - **Ação pendente do autor:** rodar o Fluxo 02 manualmente sobre as 2 fontes recém-cadastradas (`1JIkgLfQwuJS4JAabs6MdYsh87n5Xqsn9`, `1xiWXBdza2Xi05RhmXekutYk9KrJNsWfK`) para gerar seus segmentos e fichas com rastreabilidade completa — ver [docs/N8N_FLUXOS.md](./docs/N8N_FLUXOS.md).
 - Reescrever o Fluxo 03 para gravar via Editorial API antes de republicá-lo (hoje despublicado).
 
@@ -153,7 +153,7 @@ Livro
 
 ## Próxima evolução
 
-Ver seção "Roadmap de ADRs propostas" acima. Próximo passo de implementação: ADR-012 (Mapa Filosófico automatizado e busca semântica), agora que a ADR-011 (fundação de dados) está aplicada.
+Ver seção "Roadmap de ADRs propostas" acima. Próximo passo de implementação: ADR-013 (Projetos de Livro e Montagem de Capítulos), agora que ADR-011 e a parte determinística da ADR-012 estão aplicadas. Busca semântica (ADR-012 §4-5) fica pendente da escolha do modelo de embedding.
 
 ## Estrutura do repositório
 
@@ -167,7 +167,7 @@ plataforma-editorial-filosofica/
 │       ├── ADR-009.md          # arquitetura oficial (n8n orquestra, Cloud SQL é fonte, Editorial API centraliza)
 │       ├── ADR-010.md          # preservação de segmentos e canalizações
 │       ├── ADR-011.md          # IMPLEMENTADA — normalização de conceitos, vocabulários controlados, auditoria
-│       ├── ADR-012.md          # PROPOSTA — Mapa Filosófico automatizado e busca semântica
+│       ├── ADR-012.md          # PARCIAL — Mapa Filosófico automatizado implementado; busca semântica proposta
 │       ├── ADR-013.md          # PROPOSTA — Projetos de Livro e montagem de capítulos
 │       ├── ADR-014.md          # PROPOSTA — revisão editorial e consolidação
 │       └── ADR-015.md          # PROPOSTA — publicação final (DOCX/PDF/EPUB)
@@ -178,6 +178,7 @@ plataforma-editorial-filosofica/
 │   ├── migration_000_baseline.sql  # dump schema-only real do banco, capturado em 2026-07-14
 │   ├── migration_adr_010.sql
 │   ├── migration_adr_011.sql
+│   ├── migration_adr_012.sql
 │   └── DEPLOY_ADR-011.md
 ├── ai-services/                 # Serviço RODANDO em produção (Cloud Run), mas código-fonte não versionado em lugar nenhum — ver docs/GCP_INFRAESTRUTURA.md.
 └── n8n-workflows/                # PLACEHOLDER — exports JSON dos fluxos 01/02/03. Ainda não exportados do n8n Cloud.

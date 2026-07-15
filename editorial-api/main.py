@@ -130,17 +130,45 @@ def list_concepts():
             cursor.execute("""
                 SELECT
                     c.id, c.canonical_name, c.aliases, c.description,
+                    c.importance_score, c.importance_level,
                     COUNT(DISTINCT sc.segment_id) AS segment_count,
                     COUNT(DISTINCT cc.card_id) AS card_count
                 FROM editorial.concepts c
                 LEFT JOIN editorial.segment_concepts sc ON sc.concept_id = c.id
                 LEFT JOIN editorial.card_concepts cc ON cc.concept_id = c.id
                 GROUP BY c.id
-                ORDER BY (COUNT(DISTINCT sc.segment_id) + COUNT(DISTINCT cc.card_id)) DESC, c.canonical_name
+                ORDER BY c.importance_score DESC, c.canonical_name
                 LIMIT %s
             """, (limit,))
             rows = cursor.fetchall()
     return jsonify(rows)
+
+
+@app.get("/concepts/<concept_id>/relations")
+@require_api_key
+def get_concept_relations(concept_id):
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT id, canonical_name FROM editorial.concepts WHERE id = %s", (concept_id,))
+            concept = cursor.fetchone()
+            if not concept:
+                return jsonify({"error": "Concept not found"}), 404
+
+            cursor.execute("""
+                SELECT
+                    cr.id, cr.relation_type, cr.direction, cr.cooccurrence_count,
+                    cr.first_observed_at, cr.last_observed_at,
+                    other.id AS related_concept_id, other.canonical_name AS related_concept_name,
+                    other.importance_score AS related_concept_importance_score
+                FROM editorial.concept_relations cr
+                JOIN editorial.concepts other
+                  ON other.id = CASE WHEN cr.concept_a_id = %(id)s THEN cr.concept_b_id ELSE cr.concept_a_id END
+                WHERE cr.concept_a_id = %(id)s OR cr.concept_b_id = %(id)s
+                ORDER BY cr.cooccurrence_count DESC
+            """, {"id": concept_id})
+            relations = cursor.fetchall()
+
+    return jsonify({"concept": concept, "relations": relations})
 
 
 @app.post("/sources")
@@ -270,6 +298,7 @@ def upsert_segment():
             row = cursor.fetchone()
 
             sync_concepts(cursor, payload.get("concepts", []), segment_id=row["id"])
+            cursor.execute("SELECT editorial.recalculate_concept_graph()")
 
     return jsonify(row), 201
 
@@ -419,6 +448,7 @@ def upsert_knowledge_card():
             row = cursor.fetchone()
 
             sync_concepts(cursor, payload.get("concepts", []), card_id=row["id"])
+            cursor.execute("SELECT editorial.recalculate_concept_graph()")
 
     return jsonify(row), 201
 
