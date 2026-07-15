@@ -82,7 +82,7 @@ Endpoints implementados (`editorial-api/main.py`):
 
 - Nome do serviço: `editorial-ui`
 - URL: `https://editorial-ui-592824114603.southamerica-east1.run.app`
-- Autenticação: `--no-allow-unauthenticated`, IAM `roles/run.invoker` restrito a `contato@banhoseterapias.com` — mesmo padrão do `arquitetura-planner`. Acesso via `gcloud run services proxy editorial-ui --region southamerica-east1 --project thiago-ai-platform`.
+- Autenticação: `--no-allow-unauthenticated`, IAM `roles/run.invoker` restrito a `contato@banhoseterapias.com` — mesmo padrão do `arquitetura-planner`. Acesso via `gcloud run services proxy editorial-ui --region southamerica-east1 --project thiago-ai-platform --port=8081` — **a porta precisa ser 8081** (fixa em `next.config.ts`, ver nota abaixo); 8080 é usada pelo proxy do `arquitetura-planner` e, mesmo se estivesse livre, não está na lista de origens permitidas para Server Actions.
 - Código-fonte: [`editorial-ui/`](./editorial-ui/) — Next.js 16 (App Router), fala apenas com a `editorial-api` (nunca com Postgres/OpenAI diretamente), credencial `X-Service-Api-Key` mantida server-only.
 - Responsabilidade: navegar o acervo (busca semântica, filtro por conceito/tema) e montar capítulos manualmente — ver [ADR-016](./docs/adr/ADR-016.md). `POST /chapters/<id>/propose` é exposto como atalho opcional, não como fluxo principal.
 

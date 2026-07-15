@@ -19,7 +19,7 @@ Quatro serviços rodando — dois fazem parte desta plataforma.
 - URL: `https://editorial-ui-592824114603.southamerica-east1.run.app`
 - Código-fonte: [`editorial-ui/`](../editorial-ui/) neste repositório.
 - Service account: `editorial-ui@thiago-ai-platform.iam.gserviceaccount.com` — sem `roles/cloudsql.client` (não acessa o banco; fala só com a `editorial-api`); tem `secretmanager.secretAccessor` no secret reaproveitado `editorial-api-key`.
-- Acesso: `--no-allow-unauthenticated` — `roles/run.invoker` restrito a `contato@banhoseterapias.com`, mesmo padrão do `arquitetura-planner`. Acesso via `gcloud run services proxy editorial-ui --region southamerica-east1 --project thiago-ai-platform`.
+- Acesso: `--no-allow-unauthenticated` — `roles/run.invoker` restrito a `contato@banhoseterapias.com`, mesmo padrão do `arquitetura-planner`. Acesso via `gcloud run services proxy editorial-ui --region southamerica-east1 --project thiago-ai-platform --port=8081` (8080 já é o proxy do `arquitetura-planner`; a porta 8081 também está hardcoded em `experimental.serverActions.allowedOrigins` no `next.config.ts` do `editorial-ui` — sem isso, toda Server Action leva 500 por proteção CSRF do Next.js contra `x-forwarded-host` divergente do `Origin`).
 - Chama a `editorial-api` via HTTPS público, com a mesma chave `X-Service-Api-Key` lida do secret acima.
 
 ### `ai-services` — existe e está rodando; **código-fonte não está versionado em lugar nenhum**
