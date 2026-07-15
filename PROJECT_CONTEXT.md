@@ -156,8 +156,10 @@ Ver seção "Roadmap de ADRs propostas" acima. Próximo passo de implementação
 
 ## Estrutura do repositório
 
+**Caminho local (2026-07-15):** `/Users/thiagoleao/Documents/00 - PESSOAL/PROJETOS/AI-PLATFORM/LIVRO/` — movido de `~/Projects/plataforma-editorial-filosofica/` (nome mantido só no remoto do GitHub, `git@github.com:thiagoleao/plataforma-editorial-filosofica.git`).
+
 ```
-plataforma-editorial-filosofica/
+LIVRO/  (remoto GitHub: plataforma-editorial-filosofica)
 ├── PROJECT_CONTEXT.md          # este arquivo — memória oficial do projeto
 ├── docs/
 │   ├── GCP_INFRAESTRUTURA.md    # estado real da GCP, levantado via gcloud/psql (não por inferência)
@@ -169,7 +171,8 @@ plataforma-editorial-filosofica/
 │       ├── ADR-012.md          # IMPLEMENTADA — Mapa Filosófico automatizado + busca semântica (embeddings OpenAI)
 │       ├── ADR-013.md          # IMPLEMENTADA — Projetos de Livro e montagem de capítulos
 │       ├── ADR-014.md          # IMPLEMENTADA — revisão editorial e consolidação
-│       └── ADR-015.md          # PROPOSTA — publicação final (DOCX/PDF/EPUB)
+│       ├── ADR-015.md          # PROPOSTA — publicação final (DOCX/PDF/EPUB)
+│       └── originais/          # documentos-fonte em Word (ADR 009.docx, ADR 010.docx, Arquitetura da Plataforma Editorial.docx) — versões originais que deram origem aos .md acima
 ├── editorial-api/              # API oficial (Flask + Cloud SQL), deploy no Cloud Run
 │   ├── main.py
 │   ├── requirements.txt
