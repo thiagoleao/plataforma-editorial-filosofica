@@ -10,6 +10,10 @@ Construir uma plataforma capaz de transformar um acervo de vídeos em patrimôni
 
 A IA atua apenas como organizadora do conhecimento. Nunca como autora.
 
+## Processo de desenvolvimento
+
+Desde a [ADR-017](./docs/adr/ADR-017.md) (2026-07-15), toda mudança não-trivial segue: **planejar → registrar em ADR (status "Proposta") → aprovação explícita do usuário → só então desenvolver → nota de implementação ao concluir**. A ADR guia a implementação, não o contrário. Correções pontuais de bug e ajustes de configuração/infra sem mudança de comportamento não precisam de ADR própria.
+
 ## Stack Tecnológica
 
 ### Orquestração — n8n (Cloud)
@@ -109,6 +113,7 @@ Endpoints implementados (`editorial-api/main.py`):
 - [ADR-013](./docs/adr/ADR-013.md) — Projetos de Livro e Montagem de Capítulos. **Implementada em 2026-07-15.** `book_projects`/`chapters`/`chapter_sources`/`chapter_revisions` no ar. `POST /chapters/<id>/propose` monta capítulos algoritmicamente (sem LLM) a partir do escopo temático — canalizações e demais segmentos sempre como blocos literais intocáveis, fichas como material de apoio, dedup por similaridade de embedding. Gate de aprovação humana (`draft` → `assembled`) testado de ponta a ponta em produção. Ver nota de implementação na ADR.
 - [ADR-014](./docs/adr/ADR-014.md) — Revisão Editorial e Consolidação. **Implementada em 2026-07-15.** `GET /book-projects/<id>/duplicate-report` (sobreposição entre capítulos via embeddings) e `GET /chapters/<id>/consolidation-check` (fonte duplicada no mesmo capítulo, terminologia não-canônica, possível paráfrase de bloco literal) — ambos só sinalizam, nunca corrigem. `POST /chapters/<id>/review` exige `reviewed_by` humano (`assembled` → `reviewed`). Ver nota de implementação na ADR.
 - [ADR-016](./docs/adr/ADR-016.md) — Curadoria Manual como Fluxo Principal. **Implementada em 2026-07-15.** Novo serviço `editorial-ui` (Next.js, Cloud Run, IAM) para navegar o acervo e montar capítulos manualmente — inverte a ênfase da ADR-013 (`/propose` deixa de ser o caminho natural e passa a ser atalho opcional). Nenhuma mudança de schema/endpoint. Ver nota de implementação na ADR.
+- [ADR-017](./docs/adr/ADR-017.md) — Processo: Planejar, Registrar ADR, Só Depois Desenvolver. **Aprovada em 2026-07-15.** Formaliza a ordem obrigatória para toda mudança não-trivial a partir de agora: planejar → ADR em status "Proposta" → aprovação explícita → desenvolvimento guiado pela ADR → nota de implementação.
 
 ## Roadmap de ADRs propostas (2026-07-14)
 
@@ -183,6 +188,7 @@ LIVRO/  (remoto GitHub: plataforma-editorial-filosofica)
 │       ├── ADR-014.md          # IMPLEMENTADA — revisão editorial e consolidação
 │       ├── ADR-015.md          # PROPOSTA — publicação final (DOCX/PDF/EPUB)
 │       ├── ADR-016.md          # IMPLEMENTADA — curadoria manual como fluxo principal (editorial-ui)
+│       ├── ADR-017.md          # APROVADA — processo: planejar → ADR → aprovar → desenvolver
 │       └── originais/          # documentos-fonte em Word (ADR 009.docx, ADR 010.docx, Arquitetura da Plataforma Editorial.docx) — versões originais que deram origem aos .md acima
 ├── editorial-api/              # API oficial (Flask + Cloud SQL), deploy no Cloud Run
 │   ├── main.py
