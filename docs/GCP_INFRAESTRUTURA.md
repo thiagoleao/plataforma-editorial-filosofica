@@ -63,9 +63,11 @@ Três serviços rodando — só um está documentado no restante do repositório
 | `editorial-api-key` | Chave de serviço do `editorial-api` (`X-Service-Api-Key`) |
 | `editorial-database-password` | Senha do usuário `editorial_app` no Cloud SQL |
 | `editorial-postgres-admin-password` | Senha do usuário `postgres` (admin) no Cloud SQL |
+| `openai-api-key` | Chave da OpenAI, usada pela `editorial-api` para gerar embeddings (ADR-012 §4-5, adicionada em 2026-07-15). Acesso restrito à service account `editorial-api`. |
 | `ai-services-api-key` | Chave de serviço do `ai-services` |
 | `assemblyai-api-key` | Chave da AssemblyAI, usada pelo `ai-services` |
 | `anthropic-api-key` | Chave da Anthropic, usada pelo `arquitetura-planner` |
+| `planner-api-key`, `planner-database-password` | Encontrados numa nova checagem, não auditados a fundo — indicam que o `arquitetura-planner` ganhou banco próprio desde o levantamento original de 2026-07-14. Fora do escopo desta plataforma; revisar se for mexer nesse serviço. |
 
 ## Artifact Registry
 

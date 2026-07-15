@@ -1,9 +1,12 @@
 import hmac
 import os
+from datetime import datetime, timezone
 from functools import wraps
 
 import psycopg2
 from flask import Flask, jsonify, request
+from openai import OpenAI
+from pgvector.psycopg2 import register_vector
 from psycopg2.extras import Json, RealDictCursor
 
 app = Flask(__name__)
@@ -13,16 +16,38 @@ DB_NAME = os.environ.get("DB_NAME", "plataforma_editorial_filosofica")
 DB_USER = os.environ.get("DB_USER", "editorial_app")
 DB_PASSWORD = os.environ["DB_PASSWORD"]
 SERVICE_API_KEY = os.environ["SERVICE_API_KEY"]
+OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+
+EMBEDDING_MODEL = "text-embedding-3-small"
+EMBEDDING_MAX_CHARS = 20000
+
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 
 def get_connection():
-    return psycopg2.connect(
+    connection = psycopg2.connect(
         dbname=DB_NAME,
         user=DB_USER,
         password=DB_PASSWORD,
         host=f"/cloudsql/{INSTANCE_CONNECTION_NAME}",
         connect_timeout=10,
     )
+    register_vector(connection)
+    return connection
+
+
+def generate_embedding(text):
+    """Gera embedding via OpenAI (ADR-012 §4). Retorna None em caso de falha —
+    a falta de embedding nunca deve bloquear a preservação do conteúdo original."""
+    text = (text or "").strip()[:EMBEDDING_MAX_CHARS]
+    if not text:
+        return None
+    try:
+        response = openai_client.embeddings.create(model=EMBEDDING_MODEL, input=text)
+        return response.data[0].embedding
+    except Exception:
+        app.logger.exception("Failed to generate embedding")
+        return None
 
 
 def require_api_key(function):
@@ -36,6 +61,14 @@ def require_api_key(function):
 
 
 NORMALIZE_CONCEPT_KEY_SQL = "editorial.immutable_unaccent(lower(regexp_replace(trim(%s), '[-_]+', ' ', 'g')))"
+
+
+def strip_embedding(row):
+    """Remove o vetor de embedding de uma linha antes de serializar em JSON
+    (tipo vector do pgvector não é serializável e o vetor não é útil ao cliente)."""
+    if row is not None:
+        row.pop("embedding", None)
+    return row
 
 
 def sync_concepts(cursor, concept_texts, segment_id=None, card_id=None):
@@ -248,18 +281,25 @@ def upsert_segment():
 
             speaker_key_lookup = payload.get("speaker_type") or "condutor_sessao"
 
+            embedding_text = "\n\n".join(filter(None, [
+                payload["title"], payload.get("executive_summary"), payload["full_text"],
+            ]))
+            embedding = generate_embedding(embedding_text)
+
             cursor.execute("""
                 INSERT INTO editorial.content_segments (
                     segment_key, source_id, segment_order, segment_type, title,
                     executive_summary, full_text, keywords, concepts,
                     related_themes, editorial_applications, editorial_relevance,
-                    speaker_type, is_channeled, speaker_id, updated_at
+                    speaker_type, is_channeled, speaker_id,
+                    embedding, embedding_model, embedding_generated_at, updated_at
                 ) VALUES (
                     %(segment_key)s, %(source_id)s, %(segment_order)s, %(segment_type)s,
                     %(title)s, %(executive_summary)s, %(full_text)s, %(keywords)s,
                     %(concepts)s, %(related_themes)s, %(editorial_applications)s,
                     %(editorial_relevance)s, %(speaker_type)s, %(is_channeled)s,
-                    (SELECT id FROM editorial.speakers WHERE speaker_key = %(speaker_key_lookup)s), NOW()
+                    (SELECT id FROM editorial.speakers WHERE speaker_key = %(speaker_key_lookup)s),
+                    %(embedding)s::vector, %(embedding_model)s, %(embedding_generated_at)s, NOW()
                 )
                 ON CONFLICT (segment_key)
                 DO UPDATE SET
@@ -276,6 +316,9 @@ def upsert_segment():
                     speaker_type = EXCLUDED.speaker_type,
                     is_channeled = EXCLUDED.is_channeled,
                     speaker_id = EXCLUDED.speaker_id,
+                    embedding = EXCLUDED.embedding,
+                    embedding_model = EXCLUDED.embedding_model,
+                    embedding_generated_at = EXCLUDED.embedding_generated_at,
                     updated_at = NOW()
                 RETURNING *
             """, {
@@ -294,13 +337,16 @@ def upsert_segment():
                 "speaker_type": payload.get("speaker_type"),
                 "is_channeled": bool(payload.get("is_channeled", False)),
                 "speaker_key_lookup": speaker_key_lookup,
+                "embedding": embedding,
+                "embedding_model": EMBEDDING_MODEL if embedding else None,
+                "embedding_generated_at": datetime.now(timezone.utc) if embedding else None,
             })
             row = cursor.fetchone()
 
             sync_concepts(cursor, payload.get("concepts", []), segment_id=row["id"])
             cursor.execute("SELECT editorial.recalculate_concept_graph()")
 
-    return jsonify(row), 201
+    return jsonify(strip_embedding(row)), 201
 
 
 @app.get("/segments")
@@ -347,7 +393,7 @@ def list_segments():
                 LIMIT %s
             """, parameters)
             rows = cursor.fetchall()
-    return jsonify(rows)
+    return jsonify([strip_embedding(row) for row in rows])
 
 
 @app.get("/segments/<segment_id>")
@@ -364,7 +410,7 @@ def get_segment(segment_id):
             row = cursor.fetchone()
     if not row:
         return jsonify({"error": "Segment not found"}), 404
-    return jsonify(row)
+    return jsonify(strip_embedding(row))
 
 
 @app.post("/knowledge-cards")
@@ -408,16 +454,19 @@ def upsert_knowledge_card():
                     )
                 """, existing)
 
+            embedding_text = "\n\n".join(filter(None, [payload["title"], payload["summary"]]))
+            embedding = generate_embedding(embedding_text)
+
             cursor.execute("""
                 INSERT INTO editorial.knowledge_cards (
                     card_key, source_id, theme_id, segment_id, block_number,
                     title, summary, concepts, principles, quotes, evidence,
-                    relevance_score, updated_at
+                    relevance_score, embedding, embedding_model, embedding_generated_at, updated_at
                 ) VALUES (
                     %(card_key)s, %(source_id)s, %(theme_id)s, %(segment_id)s,
                     %(block_number)s, %(title)s, %(summary)s, %(concepts)s,
                     %(principles)s, %(quotes)s, %(evidence)s,
-                    %(relevance_score)s, NOW()
+                    %(relevance_score)s, %(embedding)s::vector, %(embedding_model)s, %(embedding_generated_at)s, NOW()
                 )
                 ON CONFLICT (card_key)
                 DO UPDATE SET
@@ -429,6 +478,9 @@ def upsert_knowledge_card():
                     quotes = EXCLUDED.quotes,
                     evidence = EXCLUDED.evidence,
                     relevance_score = EXCLUDED.relevance_score,
+                    embedding = EXCLUDED.embedding,
+                    embedding_model = EXCLUDED.embedding_model,
+                    embedding_generated_at = EXCLUDED.embedding_generated_at,
                     updated_at = NOW()
                 RETURNING *
             """, {
@@ -444,13 +496,16 @@ def upsert_knowledge_card():
                 "quotes": Json(payload.get("quotes", [])),
                 "evidence": Json(payload.get("evidence", [])),
                 "relevance_score": payload["relevance_score"],
+                "embedding": embedding,
+                "embedding_model": EMBEDDING_MODEL if embedding else None,
+                "embedding_generated_at": datetime.now(timezone.utc) if embedding else None,
             })
             row = cursor.fetchone()
 
             sync_concepts(cursor, payload.get("concepts", []), card_id=row["id"])
             cursor.execute("SELECT editorial.recalculate_concept_graph()")
 
-    return jsonify(row), 201
+    return jsonify(strip_embedding(row)), 201
 
 
 @app.get("/knowledge-cards")
@@ -494,6 +549,122 @@ def list_knowledge_cards():
             """, parameters)
             rows = cursor.fetchall()
     return jsonify(rows)
+
+
+@app.post("/reindex-embeddings")
+@require_api_key
+def reindex_embeddings():
+    """Gera embeddings para segmentos/fichas que ainda não têm (backfill de dados
+    anteriores à ADR-012, ou reprocessamento se o modelo de embedding mudar no futuro).
+    Passe {"force": true} para regerar mesmo os que já têm embedding."""
+    payload = request.get_json(silent=True) or {}
+    force = bool(payload.get("force", False))
+    limit = min(int(payload.get("limit", 200)), 500)
+
+    updated = {"segments": 0, "knowledge_cards": 0}
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            where = "" if force else "WHERE embedding IS NULL"
+            cursor.execute(f"""
+                SELECT id, title, executive_summary, full_text
+                FROM editorial.content_segments
+                {where}
+                ORDER BY created_at
+                LIMIT %s
+            """, (limit,))
+            segments = cursor.fetchall()
+
+            for segment in segments:
+                text = "\n\n".join(filter(None, [
+                    segment["title"], segment["executive_summary"], segment["full_text"],
+                ]))
+                embedding = generate_embedding(text)
+                if embedding is None:
+                    continue
+                cursor.execute("""
+                    UPDATE editorial.content_segments
+                    SET embedding = %s::vector, embedding_model = %s, embedding_generated_at = NOW()
+                    WHERE id = %s
+                """, (embedding, EMBEDDING_MODEL, segment["id"]))
+                updated["segments"] += 1
+
+            cursor.execute(f"""
+                SELECT id, title, summary
+                FROM editorial.knowledge_cards
+                {where}
+                ORDER BY created_at
+                LIMIT %s
+            """, (limit,))
+            cards = cursor.fetchall()
+
+            for card in cards:
+                text = "\n\n".join(filter(None, [card["title"], card["summary"]]))
+                embedding = generate_embedding(text)
+                if embedding is None:
+                    continue
+                cursor.execute("""
+                    UPDATE editorial.knowledge_cards
+                    SET embedding = %s::vector, embedding_model = %s, embedding_generated_at = NOW()
+                    WHERE id = %s
+                """, (embedding, EMBEDDING_MODEL, card["id"]))
+                updated["knowledge_cards"] += 1
+
+    return jsonify(updated)
+
+
+@app.post("/search")
+@require_api_key
+def semantic_search():
+    """Busca semântica (ADR-012 §5): embeda a consulta e ranqueia segmentos/fichas por
+    similaridade de cosseno. Não substitui os filtros exatos de /segments e /knowledge-cards,
+    complementa quando a mesma ideia aparece com vocabulário diferente ao longo do acervo."""
+    payload = request.get_json(silent=True) or {}
+    query = (payload.get("query") or "").strip()
+    if not query:
+        return jsonify({"error": "Missing required field", "fields": ["query"]}), 400
+
+    limit = min(int(payload.get("limit", 10)), 50)
+    include = payload.get("include") or ["segments", "knowledge_cards"]
+
+    query_embedding = generate_embedding(query)
+    if query_embedding is None:
+        return jsonify({"error": "Failed to generate embedding for query"}), 502
+
+    results = []
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            if "segments" in include:
+                cursor.execute("""
+                    SELECT
+                        'segment' AS result_type, cs.id, cs.title, cs.executive_summary,
+                        cs.segment_type, cs.editorial_relevance, cs.is_channeled,
+                        s.external_file_id, s.file_name AS source_file_name, s.session_date,
+                        1 - (cs.embedding <=> %(embedding)s::vector) AS similarity
+                    FROM editorial.content_segments cs
+                    JOIN editorial.sources s ON s.id = cs.source_id
+                    WHERE cs.embedding IS NOT NULL
+                    ORDER BY cs.embedding <=> %(embedding)s::vector
+                    LIMIT %(limit)s
+                """, {"embedding": query_embedding, "limit": limit})
+                results.extend(cursor.fetchall())
+
+            if "knowledge_cards" in include:
+                cursor.execute("""
+                    SELECT
+                        'knowledge_card' AS result_type, kc.id, kc.title, kc.summary,
+                        kc.importance_score, kc.importance_level,
+                        s.external_file_id, s.file_name AS source_file_name, s.session_date,
+                        1 - (kc.embedding <=> %(embedding)s::vector) AS similarity
+                    FROM editorial.knowledge_cards kc
+                    JOIN editorial.sources s ON s.id = kc.source_id
+                    WHERE kc.embedding IS NOT NULL
+                    ORDER BY kc.embedding <=> %(embedding)s::vector
+                    LIMIT %(limit)s
+                """, {"embedding": query_embedding, "limit": limit})
+                results.extend(cursor.fetchall())
+
+    results.sort(key=lambda item: item["similarity"], reverse=True)
+    return jsonify(results[:limit])
 
 
 @app.errorhandler(Exception)
