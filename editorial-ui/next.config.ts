@@ -9,6 +9,8 @@ const nextConfig: NextConfig = {
       // que reescreve x-forwarded-host para o hostname do Cloud Run enquanto o
       // browser mantém Origin como localhost — sem isso, a proteção CSRF nativa
       // do Next.js para Server Actions rejeita toda requisição de mutação.
+      // Ver nota de implementação da ADR-016. A tentativa da ADR-018 de eliminar
+      // essa necessidade (acesso público) foi revertida — ver ADR-018.
       allowedOrigins: ["localhost:8081"],
     },
   },

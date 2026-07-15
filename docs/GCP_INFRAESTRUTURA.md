@@ -76,6 +76,14 @@ Quatro serviços rodando — dois fazem parte desta plataforma.
 | `anthropic-api-key` | Chave da Anthropic, usada pelo `arquitetura-planner` |
 | `planner-api-key`, `planner-database-password` | Encontrados numa nova checagem, não auditados a fundo — indicam que o `arquitetura-planner` ganhou banco próprio desde o levantamento original de 2026-07-14. Fora do escopo desta plataforma; revisar se for mexer nesse serviço. |
 
+## Recursos órfãos (ADR-018, tentativa revertida em 2026-07-15)
+
+Uma tentativa de acesso público via NextAuth + Google OAuth (ver nota de implementação da [ADR-018](./adr/ADR-018.md)) foi revertida após dois bloqueios reais: política de organização do GCP impedindo IAM para identidades fora do domínio (inclusive `allUsers`), e conflito estrutural entre IAM do Cloud Run e o callback do OAuth. Os secrets `nextauth-secret`/`google-oauth-client-secret` foram apagados, mas o seguinte **não foi removido** (inerte, sem custo, mas sem uso):
+
+- **OAuth 2.0 Client ID "plataforma-editorial-filosofica"** (`592824114603-3682n8084ne9cvpm2iodih1pb99r5f79.apps.googleusercontent.com`), tipo Web application, no Google Auth Platform do projeto `thiago-ai-platform`.
+- **Tela de consentimento OAuth** configurada (Externo, modo Testando, 2 usuários de teste: `thiago.6286@gmail.com`, `contato@banhoseterapias.com`).
+- Confirmado que `thiago.6286@gmail.com` **não tem nenhum papel IAM** neste projeto, em nenhum nível — todo acesso operacional ao GCP deste projeto usa `contato@banhoseterapias.com`.
+
 ## Artifact Registry
 
 - Um único repositório Docker: `cloud-run-source-deploy` (`southamerica-east1`) — criado automaticamente pelo padrão `gcloud run deploy --source .`. Contém as imagens dos 4 serviços acima.
