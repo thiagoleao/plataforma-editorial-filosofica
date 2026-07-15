@@ -267,6 +267,12 @@ def upsert_segment():
             cursor.execute("SELECT * FROM editorial.content_segments WHERE segment_key = %s", (payload["segment_key"],))
             existing = cursor.fetchone()
             if existing:
+                # psycopg2 já desserializa colunas jsonb em listas/dicts Python ao buscar;
+                # precisam ser reembrulhadas em Json() para voltar a ser gravadas como jsonb
+                # (senão o psycopg2 as adapta como ARRAY do Postgres e a query falha).
+                revision_params = dict(existing)
+                for jsonb_field in ("keywords", "concepts", "related_themes", "editorial_applications"):
+                    revision_params[jsonb_field] = Json(revision_params[jsonb_field])
                 cursor.execute("""
                     INSERT INTO editorial.segment_revisions (
                         segment_id, segment_key, segment_order, segment_type, title,
@@ -277,7 +283,7 @@ def upsert_segment():
                         %(executive_summary)s, %(full_text)s, %(keywords)s, %(concepts)s, %(related_themes)s,
                         %(editorial_applications)s, %(editorial_relevance)s, %(speaker_type)s, %(is_channeled)s
                     )
-                """, existing)
+                """, revision_params)
 
             speaker_key_lookup = payload.get("speaker_type") or "condutor_sessao"
 
@@ -444,6 +450,11 @@ def upsert_knowledge_card():
             cursor.execute("SELECT * FROM editorial.knowledge_cards WHERE card_key = %s", (payload["card_key"],))
             existing = cursor.fetchone()
             if existing:
+                # ver comentário equivalente em upsert_segment: jsonb já vem desserializado
+                # do psycopg2, precisa ser reembrulhado em Json() antes de regravar.
+                revision_params = dict(existing)
+                for jsonb_field in ("concepts", "principles", "quotes", "evidence"):
+                    revision_params[jsonb_field] = Json(revision_params[jsonb_field])
                 cursor.execute("""
                     INSERT INTO editorial.card_revisions (
                         card_id, card_key, title, summary, concepts, principles,
@@ -452,7 +463,7 @@ def upsert_knowledge_card():
                         %(id)s, %(card_key)s, %(title)s, %(summary)s, %(concepts)s, %(principles)s,
                         %(quotes)s, %(evidence)s, %(relevance_score)s
                     )
-                """, existing)
+                """, revision_params)
 
             embedding_text = "\n\n".join(filter(None, [payload["title"], payload["summary"]]))
             embedding = generate_embedding(embedding_text)

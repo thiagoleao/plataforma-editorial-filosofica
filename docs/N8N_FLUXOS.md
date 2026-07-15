@@ -83,10 +83,19 @@ Gatilhos: manual e `Todo domingo` (agendado, semanal).
   - `1JIkgLfQwuJS4JAabs6MdYsh87n5Xqsn9` — sessão de 06/01/2026 ("manifestação e autoconhecimento")
   - `1xiWXBdza2Xi05RhmXekutYk9KrJNsWfK` — aula de 29/12/2025 ("desenvolvimento mediúnico e meditação")
   
-  **Ação pendente sua:** rodar o Fluxo 02 manualmente (ou aguardar o próximo ciclo de 2 horas) para que essas 2 sessões sejam processadas. As 11 fichas na Data Table do n8n continuam lá como referência, mas não foram copiadas.
 - **Conceitos/relações do n8n (34 conceitos, 108 relações) — decisão: não migrar.** Os 108 registros de `Philosophical Map` têm `cooccurrence_count=1` e `strength_score=25` em 100% das linhas — um cálculo placeholder, não diferenciado. Uma vez que a ADR-012 calcule `concept_relations` direto sobre `segment_concepts`/`card_concepts` (já normalizados pela ADR-011), o resultado será mais completo e correto do que importar esses 108 registros. Os 34 nomes de conceito ficam só como referência informal de curadoria para revisão futura, sem ação associada.
+
+## Investigação e correção: por que as 2 sessões não foram processadas (2026-07-15)
+
+Pediu-se para investigar por que o Fluxo 02, mesmo já tendo rodado várias vezes desde 2026-07-14, nunca processou as 2 sessões cadastradas acima. Dois problemas reais, distintos, foram encontrados e corrigidos:
+
+1. **Status travado na Data Table "Knowledge Processing Index".** O nó "Ignorar transcrições processadas" do Fluxo 02 não consulta o Postgres — consulta essa Data Table do n8n (`source_file_id` + `status = "completed"`, "If Row Does Not Exist"). As 2 sessões já estavam marcadas `completed` ali desde 13/07 pela tentativa antiga (mesma origem do achado anterior), então o fluxo real as pulava, achando que já tinham sido processadas. Corrigido: `status` alterado para `needs_reprocessing` nas 2 linhas correspondentes (id 1 e 2 da tabela).
+
+2. **Bug real no `editorial-api`, presente desde a ADR-011, achado ao tentar reprocessar.** Ao regravar um segmento/ficha que já existe (`existing` buscado via `SELECT *`), os campos JSONB vêm do psycopg2 já desserializados em listas Python — e o código os reinseria em `segment_revisions`/`card_revisions` sem reembrulhar em `Json(...)`, causando `psycopg2.errors.DatatypeMismatch: column "keywords" is of type jsonb but expression is of type text[]`. **Esse bug estava derrubando as execuções agendadas do Fluxo 02 desde a meia-noite de 2026-07-15** (não só as 2 sessões da reconciliação) — visível no histórico de execuções alternando sucesso/erro. Corrigido em `main.py` (`upsert_segment` e `upsert_knowledge_card`) e implantado (revisão `editorial-api-00009-6dq`). Validado com um reenvio seguro de um segmento já existente antes de mexer em dados novos.
+
+Depois da correção, uma execução completa do Fluxo 02 rodou do início ao fim sem erro. O fluxo processa 1 arquivo por execução entre ~106 pendentes (~10 min cada, mais lento agora que grava embeddings a cada gravação) — as 2 sessões específicas não caíram nessa execução por acaso, mas devem ser pegas naturalmente pelo agendamento de 2 em 2 horas ao longo do tempo. Decisão do autor: deixar o agendamento natural cuidar disso, sem disparo manual repetido.
 
 ## Decisões que ainda restam
 
-1. Rodar o Fluxo 02 sobre as 2 sessões recém-cadastradas (ação sua).
-2. Quando/se republicar o Fluxo 03 — só depois de reescrevê-lo para gravar via Editorial API em vez de Data Tables (isso é, na prática, o que a ADR-012 precisa entregar).
+1. Quando/se republicar o Fluxo 03 — só depois de reescrevê-lo para gravar via Editorial API em vez de Data Tables (isso é, na prática, o que a ADR-012 precisa entregar).
+2. Acompanhar se as 2 sessões da reconciliação são de fato processadas nos próximos ciclos agendados.

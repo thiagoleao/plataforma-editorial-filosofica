@@ -109,7 +109,7 @@ Plano para viabilizar a geração de capítulos de livro com qualidade, a partir
 
 Decisões explicitamente pendentes (não devem ser assumidas silenciosamente em implementação futura):
 - Levantamento das consciências canalizadas distintas do acervo (ADR-011 §3) — hoje só existe o marcador genérico "consciência canalizada".
-- **Ação pendente do autor:** as 2 fontes cadastradas para reconciliação (`1JIkgLfQwuJS4JAabs6MdYsh87n5Xqsn9`, `1xiWXBdza2Xi05RhmXekutYk9KrJNsWfK`) continuam com `processing_status: pending` e **0 segmentos/fichas** mesmo após o pipeline ter rodado automaticamente várias vezes desde 2026-07-14 — o Fluxo 02 não as pegou sozinho (a lógica de "ignorar já processadas" pode estar considerando outro critério além do `processing_status`). Precisa rodar manualmente ou investigar por quê. Ver [docs/N8N_FLUXOS.md](./docs/N8N_FLUXOS.md).
+- **Resolvido em 2026-07-15:** as 2 fontes de reconciliação (`1JIkgLfQwuJS4JAabs6MdYsh87n5Xqsn9`, `1xiWXBdza2Xi05RhmXekutYk9KrJNsWfK`) estavam bloqueadas por dois problemas reais, ambos corrigidos — ver nota de implementação na ADR-011 e [docs/N8N_FLUXOS.md](./docs/N8N_FLUXOS.md) para detalhes. Continuam com `processing_status: pending` porque o Fluxo 02 processa 1 arquivo por execução entre ~106 pendentes; devem ser pegas naturalmente pelo agendamento de 2 em 2 horas, sem ação adicional necessária.
 - Reescrever o Fluxo 03 para gravar via Editorial API antes de republicá-lo (hoje despublicado).
 
 ## Modelo de dados
