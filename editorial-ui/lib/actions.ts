@@ -53,6 +53,32 @@ export async function saveChapterSourcesAction(
   }
 }
 
+export async function saveChapterManuscriptAction(
+  chapterId: string,
+  bookProjectId: string,
+  manuscriptContent: api.ManuscriptDoc
+): Promise<ActionResult> {
+  try {
+    await api.setChapterManuscript(chapterId, manuscriptContent);
+    revalidatePath(`/projects/${bookProjectId}/chapters/${chapterId}/manuscript`);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) };
+  }
+}
+
+export async function checkpointChapterManuscriptAction(
+  chapterId: string,
+  label?: string
+): Promise<ActionResult> {
+  try {
+    await api.checkpointChapterManuscript(chapterId, label);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) };
+  }
+}
+
 export async function proposeChapterAction(
   chapterId: string,
   bookProjectId: string,

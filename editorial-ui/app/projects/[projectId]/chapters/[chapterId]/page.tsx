@@ -29,9 +29,17 @@ export default async function ChapterPage({
         <Link href={`/projects/${projectId}`} className="text-sm text-gray-500 hover:underline">
           ← {chapter.book_project_title}
         </Link>
-        <h1 className="mt-1 text-2xl font-semibold">
-          #{chapter.chapter_order} {chapter.title}
-        </h1>
+        <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+          <h1 className="text-2xl font-semibold">
+            #{chapter.chapter_order} {chapter.title}
+          </h1>
+          <Link
+            href={`/projects/${projectId}/chapters/${chapterId}/manuscript`}
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+          >
+            Ver manuscrito
+          </Link>
+        </div>
       </div>
       <ChapterBuilder key={sourcesKey} chapter={chapter} concepts={concepts} />
     </div>

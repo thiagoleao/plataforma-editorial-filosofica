@@ -116,6 +116,7 @@ Endpoints implementados (`editorial-api/main.py`):
 - [ADR-017](./docs/adr/ADR-017.md) — Processo: Planejar, Registrar ADR, Só Depois Desenvolver. **Aprovada em 2026-07-15.** Formaliza a ordem obrigatória para toda mudança não-trivial a partir de agora: planejar → ADR em status "Proposta" → aprovação explícita → desenvolvimento guiado pela ADR → nota de implementação.
 - [ADR-022](./docs/adr/ADR-022.md) — Camada de Enriquecimento: Fichas Higienizadas, Cartões de Insight e Relações Tipadas de Conceito. **Implementada em 2026-07-16.** §2 (cartões de insight filosófico por segmento, `editorial.segment_insights`, geração sob demanda via chat completion), §3 (completa a ADR-012 §2: tipagem de `concept_relations` por LLM) e §4 (`editorial.concepts.scope` universal/temático) no ar, testados em produção via `editorial-ui`. §1 (fichas higienizadas): prompt do Fluxo 02 (n8n) reescrito e publicado (arco gancho/desenvolvimento/conclusão, citações isoladas em `quotes`/`evidence`) e as 121 fichas existentes reprocessadas em lote via script de uso único (`editorial-api/scripts/reprocess_fichas_adr022.py`) — 108 atualizadas, 8 sinalizadas para revisão humana (não apagadas), 5 com erro conhecido (fichas órfãs já documentadas). Ver nota de implementação na ADR.
 - [ADR-019](./docs/adr/ADR-019.md) — Sugestões Automáticas de Capítulos. **Implementada em 2026-07-16.** Novo pipeline: `editorial.chapter_suggestions`, endpoints `GET/POST /chapter-suggestions*` (geração via chat completion `gpt-4.1-mini` para título/resumo do card, conteúdo proposto sempre blocos literais/fichas originais), promoção transacional para capítulo real, páginas `/chapter-suggestions` na `editorial-ui`. Fluxo n8n "04 - Sugestões Automáticas de Capítulo" (Schedule Trigger semanal → `POST /chapter-suggestions/generate`) publicado e ativo. Primeira vez que o projeto usa geração de texto (chat completion) da OpenAI, compartilhada com a ADR-022. Ver nota de implementação na ADR.
+- [ADR-020](./docs/adr/ADR-020.md) — Editor de Manuscrito com Preservação de Blocos Literais. **Implementada em 2026-07-16** (Fase A e Fase B). Fase A: edição rica (Tiptap) de blocos de transição no `ChapterBuilder`. Fase B: página `/chapters/<id>/manuscript` compondo um documento contínuo a partir das fontes do capítulo, com blocos `literal_segment` travados por dupla defesa — nó Tiptap sem superfície editável + `filterTransaction` no cliente, e verificação server-side obrigatória em `PUT /chapters/<id>/manuscript` (nunca confia no cliente) que rejeita qualquer remoção ou adulteração de texto de bloco travado. Checkpoints explícitos ("salvar versão") em `chapter_manuscript_revisions`. Autosave foi deliberadamente **não implementado** nas duas fases, pela mesma razão: um loop real de re-save contra produção na Fase A (ver nota de implementação). Ver nota de implementação na ADR para o relato completo, incluindo os testes explícitos da trava dupla.
 
 ## Roadmap de ADRs propostas (2026-07-14)
 
@@ -131,9 +132,7 @@ Evolução da `editorial-ui` pedida pelo usuário: acesso hospedado com login, s
 - [ADR-021](./docs/adr/ADR-021.md) — Refresh de Design (shadcn/ui). Sem fase de rollout isolada — aplicado dentro do trabalho das ADR-018 a 020.
 - ADR-022 — ver "ADRs implementadas" acima (implementada, movida daqui em 2026-07-15/16).
 - ADR-019 — ver "ADRs implementadas" acima (implementada, movida daqui em 2026-07-16).
-
-**Em andamento (2026-07-16):**
-- [ADR-020](./docs/adr/ADR-020.md) — Editor de Manuscrito com Preservação de Blocos Literais. **Fase A implementada** — edição rica (Tiptap) de blocos de transição no `ChapterBuilder`, salvamento manual (autosave foi tentado, causou um loop de re-save real contra produção — ver nota de implementação — e foi removido). Fase B (manuscrito contínuo com blocos de canalização travados) ainda não iniciada.
+- ADR-020 — ver "ADRs implementadas" acima (implementada, movida daqui em 2026-07-16).
 
 Decisões explicitamente pendentes (não devem ser assumidas silenciosamente em implementação futura):
 - **Resolvido em 2026-07-16:** ADR-022 §1 (fichas higienizadas) — ver nota de implementação na ADR. Fica pendente apenas a revisão manual editorial das 8 fichas sinalizadas pelo reprocessamento (`create_card=false` no novo julgamento) — decisão de curadoria, não técnica.
@@ -208,7 +207,7 @@ LIVRO/  (remoto GitHub: plataforma-editorial-filosofica)
 │       ├── ADR-017.md          # APROVADA — processo: planejar → ADR → aprovar → desenvolver
 │       ├── ADR-018.md          # REJEITADA NA IMPLEMENTAÇÃO — acesso público via NextAuth (revertido, ver nota)
 │       ├── ADR-019.md          # IMPLEMENTADA — sugestões automáticas de capítulos + fluxo n8n agendado
-│       ├── ADR-020.md          # FASE A IMPLEMENTADA — edição de transições (Tiptap); Fase B (manuscrito travado) não iniciada
+│       ├── ADR-020.md          # IMPLEMENTADA — editor de manuscrito (Tiptap): transições (Fase A) + manuscrito contínuo travado (Fase B)
 │       ├── ADR-021.md          # PROPOSTA — refresh de design (shadcn/ui)
 │       ├── ADR-022.md          # IMPLEMENTADA — fichas higienizadas, cartões de insight, relações tipadas, escopo de conceito
 │       └── originais/          # documentos-fonte em Word (ADR 009.docx, ADR 010.docx, Arquitetura da Plataforma Editorial.docx) — versões originais que deram origem aos .md acima
@@ -225,11 +224,12 @@ LIVRO/  (remoto GitHub: plataforma-editorial-filosofica)
 │   ├── migration_adr_014.sql
 │   ├── migration_adr_022.sql
 │   ├── migration_adr_019.sql
+│   ├── migration_adr_020.sql
 │   ├── scripts/
 │   │   └── reprocess_fichas_adr022.py  # script de uso único — reprocessamento em lote das fichas (ADR-022 §1), não é automação recorrente
 │   └── DEPLOY_ADR-011.md
 ├── editorial-ui/                # Interface de curadoria (Next.js), deploy no Cloud Run — ver ADR-016
-│   ├── app/                     # rotas: /, /projects/[projectId], /projects/[projectId]/chapters/[chapterId], /projects/[projectId]/duplicate-report, /chapter-suggestions, /chapter-suggestions/[suggestionId]
+│   ├── app/                     # rotas: /, /projects/[projectId], /projects/[projectId]/chapters/[chapterId], /projects/[projectId]/chapters/[chapterId]/manuscript, /projects/[projectId]/duplicate-report, /chapter-suggestions, /chapter-suggestions/[suggestionId]
 │   ├── lib/editorial-api.ts     # cliente server-only para a editorial-api
 │   ├── lib/actions.ts           # Server Actions (criar projeto/capítulo, salvar fontes, aprovar, revisar)
 │   ├── components/

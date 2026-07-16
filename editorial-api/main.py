@@ -1490,6 +1490,159 @@ def set_chapter_sources(chapter_id):
     return jsonify(result)
 
 
+def extract_literal_segments(doc):
+    """Percorre um documento Tiptap (JSON) e retorna {segment_id: text} de todo nó
+    literalSegment encontrado, em qualquer profundidade (ADR-020 Fase B)."""
+    found = {}
+
+    def walk(node):
+        if not isinstance(node, dict):
+            return
+        if node.get("type") == "literalSegment":
+            attrs = node.get("attrs") or {}
+            segment_id = attrs.get("segmentId")
+            if segment_id:
+                found[segment_id] = attrs.get("text", "")
+        for child in node.get("content") or []:
+            walk(child)
+
+    walk(doc)
+    return found
+
+
+def compose_manuscript_from_sources(cursor, chapter_id):
+    """Monta o documento Tiptap inicial do manuscrito a partir de chapter_sources (usado só
+    na primeira leitura, antes de qualquer manuscript_content existir). literal_segment vira
+    nó travado; card_synthesis/transition_context viram parágrafos editáveis comuns."""
+    chapter = build_chapter_detail(cursor, chapter_id)
+    content = []
+    for source in chapter["sources"]:
+        if source["inclusion_type"] == "literal_segment":
+            content.append({
+                "type": "literalSegment",
+                "attrs": {
+                    "segmentId": str(source["segment_id"]),
+                    "title": source["segment_title"],
+                    "text": source["segment_full_text"],
+                },
+            })
+        else:
+            text = source["content"] if source["inclusion_type"] == "transition_context" else source["card_summary"]
+            for paragraph in (text or "").split("\n\n"):
+                if paragraph.strip():
+                    content.append({"type": "paragraph", "content": [{"type": "text", "text": paragraph.strip()}]})
+    return {"type": "doc", "content": content}
+
+
+@app.get("/chapters/<chapter_id>/manuscript")
+@require_api_key
+def get_chapter_manuscript(chapter_id):
+    """ADR-020 Fase B. Se o manuscrito ainda não foi salvo nenhuma vez, compõe uma versão
+    inicial a partir das chapter_sources atuais (sem persistir — só a primeira gravação real
+    via PUT formaliza o manuscrito)."""
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT * FROM editorial.chapters WHERE id = %s", (chapter_id,))
+            chapter = cursor.fetchone()
+            if not chapter:
+                return jsonify({"error": "Chapter not found"}), 404
+
+            if chapter["manuscript_content"] is not None:
+                return jsonify({
+                    "manuscript_content": chapter["manuscript_content"],
+                    "manuscript_updated_at": chapter["manuscript_updated_at"],
+                    "initialized": True,
+                })
+
+            composed = compose_manuscript_from_sources(cursor, chapter_id)
+    return jsonify({"manuscript_content": composed, "manuscript_updated_at": None, "initialized": False})
+
+
+@app.put("/chapters/<chapter_id>/manuscript")
+@require_api_key
+def set_chapter_manuscript(chapter_id):
+    """ADR-020 Fase B. Nunca confia no cliente para preservar blocos literais: a cada
+    gravação, verifica que todo segment_id exigido continua presente e que seu texto é
+    idêntico a content_segments.full_text (fonte de verdade). Rejeita a gravação inteira se
+    qualquer bloco travado tiver sido removido ou alterado."""
+    payload = request.get_json(silent=True) or {}
+    new_content = payload.get("manuscript_content")
+    if not isinstance(new_content, dict):
+        return jsonify({"error": "Missing required field", "fields": ["manuscript_content"]}), 400
+
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT * FROM editorial.chapters WHERE id = %s", (chapter_id,))
+            chapter = cursor.fetchone()
+            if not chapter:
+                return jsonify({"error": "Chapter not found"}), 404
+
+            new_segments = extract_literal_segments(new_content)
+
+            if chapter["manuscript_content"] is not None:
+                required_ids = set(extract_literal_segments(chapter["manuscript_content"]).keys())
+            else:
+                cursor.execute("""
+                    SELECT segment_id::text AS segment_id FROM editorial.chapter_sources
+                    WHERE chapter_id = %s AND inclusion_type = 'literal_segment' AND segment_id IS NOT NULL
+                """, (chapter_id,))
+                required_ids = {row["segment_id"] for row in cursor.fetchall()}
+
+            missing = required_ids - set(new_segments.keys())
+            if missing:
+                return jsonify({
+                    "error": "Manuscript is missing required literal segments",
+                    "segment_ids": sorted(missing),
+                }), 400
+
+            if new_segments:
+                cursor.execute(
+                    "SELECT id::text AS id, full_text FROM editorial.content_segments WHERE id = ANY(%s::uuid[])",
+                    (list(new_segments.keys()),),
+                )
+                truth = {row["id"]: row["full_text"] for row in cursor.fetchall()}
+                for segment_id, text in new_segments.items():
+                    if segment_id not in truth:
+                        return jsonify({"error": "Unknown segment_id in manuscript", "segment_id": segment_id}), 400
+                    if text != truth[segment_id]:
+                        return jsonify({
+                            "error": "Literal segment text does not match source of truth",
+                            "segment_id": segment_id,
+                        }), 400
+
+            cursor.execute("""
+                UPDATE editorial.chapters
+                SET manuscript_content = %s, manuscript_updated_at = NOW()
+                WHERE id = %s
+            """, (Json(new_content), chapter_id))
+    return jsonify({"ok": True})
+
+
+@app.post("/chapters/<chapter_id>/manuscript/checkpoint")
+@require_api_key
+def checkpoint_chapter_manuscript(chapter_id):
+    """Checkpoint explícito ("salvar versão") — nunca automático/silencioso (ADR-020 Fase B)."""
+    payload = request.get_json(silent=True) or {}
+    label = payload.get("label")
+
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT manuscript_content FROM editorial.chapters WHERE id = %s", (chapter_id,))
+            chapter = cursor.fetchone()
+            if not chapter:
+                return jsonify({"error": "Chapter not found"}), 404
+            if chapter["manuscript_content"] is None:
+                return jsonify({"error": "Manuscript has no content to checkpoint yet"}), 400
+
+            cursor.execute("""
+                INSERT INTO editorial.chapter_manuscript_revisions (chapter_id, manuscript_content, label)
+                VALUES (%s, %s, %s)
+                RETURNING id, created_at
+            """, (chapter_id, Json(chapter["manuscript_content"]), label))
+            row = cursor.fetchone()
+    return jsonify(row), 201
+
+
 @app.post("/chapters/<chapter_id>/approve")
 @require_api_key
 def approve_chapter(chapter_id):

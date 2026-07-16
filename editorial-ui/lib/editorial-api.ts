@@ -351,6 +351,33 @@ export function setChapterSources(id: string, sources: ChapterSourceInput[]) {
   return request<ChapterDetail>(`/chapters/${id}/sources`, { method: "PUT", body: { sources } });
 }
 
+export type ManuscriptNode = { type: string; attrs?: Record<string, unknown>; content?: ManuscriptNode[] };
+export type ManuscriptDoc = { type: "doc"; content: ManuscriptNode[] };
+
+export type ChapterManuscript = {
+  manuscript_content: ManuscriptDoc;
+  manuscript_updated_at: string | null;
+  initialized: boolean;
+};
+
+export function getChapterManuscript(id: string) {
+  return request<ChapterManuscript>(`/chapters/${id}/manuscript`);
+}
+
+export function setChapterManuscript(id: string, manuscriptContent: ManuscriptDoc) {
+  return request<{ ok: true }>(`/chapters/${id}/manuscript`, {
+    method: "PUT",
+    body: { manuscript_content: manuscriptContent },
+  });
+}
+
+export function checkpointChapterManuscript(id: string, label?: string) {
+  return request<{ id: string; created_at: string }>(`/chapters/${id}/manuscript/checkpoint`, {
+    method: "POST",
+    body: { label },
+  });
+}
+
 export function approveChapter(id: string) {
   return request<ChapterDetail>(`/chapters/${id}/approve`, { method: "POST" });
 }
