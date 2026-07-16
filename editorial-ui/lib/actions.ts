@@ -104,3 +104,36 @@ export async function runConsolidationCheckAction(
     return { ok: false, error: errorMessage(error) };
   }
 }
+
+export async function generateSegmentInsightsAction(
+  segmentId: string
+): Promise<{ ok: true; data: api.SegmentInsight[] } | { ok: false; error: string }> {
+  try {
+    const data = await api.generateSegmentInsights(segmentId);
+    return { ok: true, data };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) };
+  }
+}
+
+export async function reviewSegmentInsightAction(
+  insightId: string
+): Promise<{ ok: true; data: api.SegmentInsight } | { ok: false; error: string }> {
+  try {
+    const data = await api.reviewSegmentInsight(insightId);
+    return { ok: true, data };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) };
+  }
+}
+
+export async function dismissSegmentInsightAction(
+  insightId: string
+): Promise<{ ok: true; data: api.SegmentInsight } | { ok: false; error: string }> {
+  try {
+    const data = await api.dismissSegmentInsight(insightId);
+    return { ok: true, data };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) };
+  }
+}

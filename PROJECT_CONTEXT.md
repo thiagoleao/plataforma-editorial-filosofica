@@ -114,6 +114,7 @@ Endpoints implementados (`editorial-api/main.py`):
 - [ADR-014](./docs/adr/ADR-014.md) — Revisão Editorial e Consolidação. **Implementada em 2026-07-15.** `GET /book-projects/<id>/duplicate-report` (sobreposição entre capítulos via embeddings) e `GET /chapters/<id>/consolidation-check` (fonte duplicada no mesmo capítulo, terminologia não-canônica, possível paráfrase de bloco literal) — ambos só sinalizam, nunca corrigem. `POST /chapters/<id>/review` exige `reviewed_by` humano (`assembled` → `reviewed`). Ver nota de implementação na ADR.
 - [ADR-016](./docs/adr/ADR-016.md) — Curadoria Manual como Fluxo Principal. **Implementada em 2026-07-15.** Novo serviço `editorial-ui` (Next.js, Cloud Run, IAM) para navegar o acervo e montar capítulos manualmente — inverte a ênfase da ADR-013 (`/propose` deixa de ser o caminho natural e passa a ser atalho opcional). Nenhuma mudança de schema/endpoint. Ver nota de implementação na ADR.
 - [ADR-017](./docs/adr/ADR-017.md) — Processo: Planejar, Registrar ADR, Só Depois Desenvolver. **Aprovada em 2026-07-15.** Formaliza a ordem obrigatória para toda mudança não-trivial a partir de agora: planejar → ADR em status "Proposta" → aprovação explícita → desenvolvimento guiado pela ADR → nota de implementação.
+- [ADR-022](./docs/adr/ADR-022.md) — Camada de Enriquecimento: Cartões de Insight e Relações Tipadas de Conceito. **Parcialmente implementada em 2026-07-15** — §2 (cartões de insight filosófico por segmento, `editorial.segment_insights`, geração sob demanda via chat completion), §3 (completa a ADR-012 §2: tipagem de `concept_relations` por LLM) e §4 (`editorial.concepts.scope` universal/temático) no ar, testados em produção via `editorial-ui`. §1 (fichas higienizadas — prompt do Fluxo 02 no n8n + reprocessamento em lote) segue pendente, fora do repositório. Ver nota de implementação na ADR.
 
 ## Roadmap de ADRs propostas (2026-07-14)
 
@@ -129,10 +130,10 @@ Evolução da `editorial-ui` pedida pelo usuário: acesso hospedado com login, s
 - [ADR-019](./docs/adr/ADR-019.md) — Sugestões Automáticas de Capítulos (renomeada em 2026-07-15, era "Insights Automáticos" — colidia com o termo "insight" da ADR-022). Novo pipeline assíncrono (fluxo n8n agendado) que varre o acervo e sugere capítulos candidatos como cards — primeira vez que o projeto usa geração de texto (chat completion) da OpenAI, não só embeddings. Inclui o sinal de "aprendizado de estilo" (escopo aprovado pelo usuário: só estrutura/curadoria, nunca prosa nova). **Depende da ADR-022 — deve ser implementada depois dela**, apesar do número menor.
 - [ADR-020](./docs/adr/ADR-020.md) — Editor de Manuscrito com Preservação de Blocos Literais. Editor rico (Tiptap) em duas fases — edição de transições, depois um manuscrito contínuo por capítulo com blocos de canalização travados (trava dupla: cliente + verificação server-side).
 - [ADR-021](./docs/adr/ADR-021.md) — Refresh de Design (shadcn/ui). Sem fase de rollout isolada — aplicado dentro do trabalho das ADR-018 a 020.
-- [ADR-022](./docs/adr/ADR-022.md) — Camada de Enriquecimento: Fichas Higienizadas, Cartões de Insight e Relações Tipadas de Conceito (2026-07-15, Proposta). Prompt novo para fichas (estrutura gancho→desenvolvimento→conclusão, português corrigido, citações literais separadas da paráfrase) + reprocessamento em lote das ~76 fichas existentes; nova tabela `segment_insights` (cartão de insight filosófico por segmento, gerado sob demanda, sempre "ressoa com" nunca "é"); completa a ADR-012 §2 (relações tipadas de conceito, método revisado para inferência por LLM em vez de marcador textual); estende `editorial.concepts` com campo `scope` (universal/temático, aditivo à ADR-011 §4) para parar de prender conceitos universais sob rótulos temáticos como "chamas gêmeas". **Deve ser implementada antes da ADR-019**, apesar do número maior.
+- ADR-022 — ver "ADRs implementadas" acima (parcialmente implementada, movida daqui em 2026-07-15).
 
 Decisões explicitamente pendentes (não devem ser assumidas silenciosamente em implementação futura):
-- **Qualidade de extração (2026-07-15):** virou [ADR-022](./docs/adr/ADR-022.md) (Proposta) — fichas rasas, ausência de rede de pensamento no grafo de conceitos, e conteúdo universal preso sob rótulos temáticos como "chamas gêmeas". Nenhum reprocessamento em massa das ~76 fichas existentes deve acontecer antes da ADR-022 ser aprovada e o prompt novo validado numa amostra.
+- **ADR-022 §1 (fichas higienizadas), 2026-07-15:** prompt novo para o Fluxo 02 (n8n, fora do repositório) + reprocessamento em lote das ~76 fichas existentes, reaproveitando `card_revisions`. Não deve ser feito silenciosamente — sessão própria, dado que edita um fluxo em produção.
 - **Débito técnico (ADR-018, 2026-07-15):** acesso hospedado sem CLI para `editorial-ui` continua pendente. Próxima tentativa: autenticação usuário/senha controlada pela própria aplicação (não OAuth de terceiro) — decisão explícita do usuário após o NextAuth+Google esbarrar em bloqueio de política de organização do GCP e num conflito estrutural entre IAM do Cloud Run e callback OAuth. Ver nota de implementação da ADR-018.
 - Levantamento das consciências canalizadas distintas do acervo (ADR-011 §3) — hoje só existe o marcador genérico "consciência canalizada".
 - **Resolvido em 2026-07-15:** as 2 fontes de reconciliação (`1JIkgLfQwuJS4JAabs6MdYsh87n5Xqsn9`, `1xiWXBdza2Xi05RhmXekutYk9KrJNsWfK`) estavam bloqueadas por dois problemas reais, ambos corrigidos — ver nota de implementação na ADR-011 e [docs/N8N_FLUXOS.md](./docs/N8N_FLUXOS.md) para detalhes. Continuam com `processing_status: pending` porque o Fluxo 02 processa 1 arquivo por execução entre ~106 pendentes; devem ser pegas naturalmente pelo agendamento de 2 em 2 horas, sem ação adicional necessária.
@@ -205,7 +206,7 @@ LIVRO/  (remoto GitHub: plataforma-editorial-filosofica)
 │       ├── ADR-019.md          # PROPOSTA — sugestões automáticas de capítulos (depende da ADR-022)
 │       ├── ADR-020.md          # PROPOSTA — editor de manuscrito com preservação de blocos literais
 │       ├── ADR-021.md          # PROPOSTA — refresh de design (shadcn/ui)
-│       ├── ADR-022.md          # PROPOSTA — fichas higienizadas, cartões de insight, relações tipadas
+│       ├── ADR-022.md          # PARCIALMENTE IMPLEMENTADA — cartões de insight/relações tipadas no ar; fichas higienizadas (§1) pendente
 │       └── originais/          # documentos-fonte em Word (ADR 009.docx, ADR 010.docx, Arquitetura da Plataforma Editorial.docx) — versões originais que deram origem aos .md acima
 ├── editorial-api/              # API oficial (Flask + Cloud SQL), deploy no Cloud Run
 │   ├── main.py
@@ -218,6 +219,7 @@ LIVRO/  (remoto GitHub: plataforma-editorial-filosofica)
 │   ├── migration_adr_012_embeddings.sql
 │   ├── migration_adr_013.sql
 │   ├── migration_adr_014.sql
+│   ├── migration_adr_022.sql
 │   └── DEPLOY_ADR-011.md
 ├── editorial-ui/                # Interface de curadoria (Next.js), deploy no Cloud Run — ver ADR-016
 │   ├── app/                     # rotas: /, /projects/[projectId], /projects/[projectId]/chapters/[chapterId], /projects/[projectId]/duplicate-report

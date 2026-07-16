@@ -390,6 +390,7 @@ export default function ChapterBuilder({
               <SourceResultCard
                 key={`${result.result_type}-${result.id}`}
                 kind={result.result_type}
+                segmentId={result.result_type === "segment" ? result.id : null}
                 title={result.title}
                 snippet={result.summary ?? result.executive_summary ?? null}
                 segmentType={result.segment_type}
@@ -438,6 +439,7 @@ export default function ChapterBuilder({
               <SourceResultCard
                 key={source.key}
                 kind={source.segment_id ? "segment" : "knowledge_card"}
+                segmentId={source.segment_id}
                 title={source.title}
                 snippet={source.snippet}
                 fullText={source.fullText}

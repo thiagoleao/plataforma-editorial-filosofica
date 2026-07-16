@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import SegmentInsightPanel from "./SegmentInsightPanel";
 
 export type CardKind = "segment" | "knowledge_card";
 
 export default function SourceResultCard({
   kind,
+  segmentId,
   title,
   snippet,
   fullText,
@@ -18,6 +20,7 @@ export default function SourceResultCard({
   extra,
 }: {
   kind: CardKind;
+  segmentId?: string | null;
   title: string;
   snippet: string | null;
   fullText?: string | null;
@@ -80,6 +83,7 @@ export default function SourceResultCard({
             </button>
           )}
           {extra}
+          {kind === "segment" && segmentId && <SegmentInsightPanel segmentId={segmentId} />}
         </div>
         <button
           type="button"

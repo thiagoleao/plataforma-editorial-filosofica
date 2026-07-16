@@ -1,4 +1,5 @@
 import hmac
+import json
 import math
 import os
 import uuid
@@ -22,6 +23,8 @@ OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_MAX_CHARS = 20000
+CHAT_MODEL = "gpt-4.1-mini"
+RELATION_TYPES = {"cooccurrence", "causal", "evolutionary", "pre_requisito", "contraste", "manifestacao_de"}
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -50,6 +53,79 @@ def generate_embedding(text):
     except Exception:
         app.logger.exception("Failed to generate embedding")
         return None
+
+
+SEGMENT_INSIGHT_SYSTEM_PROMPT = """Você é um assistente editorial que lê trechos de canalizações \
+filosóficas/psicológicas e produz cartões de contextualização — nunca reescreve, resume ou \
+parafraseia o texto original.
+
+Para cada conceito central e genuinamente distinto no trecho (no máximo 3), produza um cartão com:
+- concept_title: título curto do conceito
+- explanation: explicação do conceito
+- philosophical_context: com que linhagem/escola de pensamento ele dialoga
+- practical_application: como se aplica na vida prática
+- related_concepts: lista curta de conceitos (nomes canônicos em português) associados
+
+No campo philosophical_context, use SEMPRE linguagem de aproximação — "ressoa com", "dialoga com" —
+nunca de equivalência ("isto é X", "isto vem de X"). Cite conceitos nomeados específicos (ex. "moral
+do rebanho", "má-fé sartriana", "biopoder foucaultiano"), nunca referências vagas de autoridade. A
+fonte é canalização espiritual/psicológica, não filosofia acadêmica — trate qualquer conexão como
+interpretação editorial, nunca como fato sobre a origem do texto.
+
+Depois, se dois ou mais conceitos (dos cartões acima ou da lista de conceitos já associados ao
+segmento, fornecida pelo usuário) se relacionarem de forma clara e evidente no texto, classifique a
+relação em exatamente um destes tipos: pre_requisito, contraste, manifestacao_de, causal,
+evolutionary. Só inclua relações com evidência clara — não force relações.
+
+Responda em português, em JSON estrito, sem texto fora do JSON, no formato:
+{"insights": [{"concept_title": "...", "explanation": "...", "philosophical_context": "...",
+"practical_application": "...", "related_concepts": ["..."]}],
+"relations": [{"concept_a": "...", "concept_b": "...", "relation_type": "..."}]}"""
+
+
+def generate_segment_insights(segment_text, existing_concept_names):
+    """Gera cartões de insight filosófico + relações tipadas para um segmento via chat
+    completion (ADR-022 §2-3). Nunca reescreve o segmento — produz comentário interpretativo
+    separado. Retorna ([], []) em caso de falha; a ausência de insight nunca bloqueia nada."""
+    user_prompt = (
+        f"Conceitos já associados a este segmento (use como referência, se úteis): "
+        f"{', '.join(existing_concept_names) if existing_concept_names else 'nenhum'}\n\n"
+        f"Trecho:\n{(segment_text or '').strip()[:8000]}"
+    )
+    try:
+        response = openai_client.chat.completions.create(
+            model=CHAT_MODEL,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": SEGMENT_INSIGHT_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        data = json.loads(response.choices[0].message.content)
+        return data.get("insights") or [], data.get("relations") or []
+    except Exception:
+        app.logger.exception("Failed to generate segment insights")
+        return [], []
+
+
+def apply_relation_types(cursor, name_to_id, relations):
+    """Aplica tipagem de concept_relations inferida por LLM (ADR-022 §3, completa a
+    ADR-012 §2). Cria a relação se ainda não existir, atualiza o tipo se já existir."""
+    for relation in relations or []:
+        relation_type = relation.get("relation_type")
+        if relation_type not in RELATION_TYPES:
+            continue
+        id_a = name_to_id.get(relation.get("concept_a"))
+        id_b = name_to_id.get(relation.get("concept_b"))
+        if not id_a or not id_b or id_a == id_b:
+            continue
+        cursor.execute("""
+            INSERT INTO editorial.concept_relations (concept_a_id, concept_b_id, relation_type, cooccurrence_count, last_observed_at)
+            VALUES (LEAST(%(a)s::uuid, %(b)s::uuid), GREATEST(%(a)s::uuid, %(b)s::uuid), %(relation_type)s, 1, NOW())
+            ON CONFLICT (concept_a_id, concept_b_id) DO UPDATE SET
+                relation_type = EXCLUDED.relation_type,
+                last_observed_at = NOW()
+        """, {"a": id_a, "b": id_b, "relation_type": relation_type})
 
 
 def require_api_key(function):
@@ -243,7 +319,7 @@ def list_concepts():
             cursor.execute("""
                 SELECT
                     c.id, c.canonical_name, c.aliases, c.description,
-                    c.importance_score, c.importance_level,
+                    c.importance_score, c.importance_level, c.scope,
                     COUNT(DISTINCT sc.segment_id) AS segment_count,
                     COUNT(DISTINCT cc.card_id) AS card_count
                 FROM editorial.concepts c
@@ -255,6 +331,28 @@ def list_concepts():
             """, (limit,))
             rows = cursor.fetchall()
     return jsonify(rows)
+
+
+@app.post("/concepts/<concept_id>/scope")
+@require_api_key
+def set_concept_scope(concept_id):
+    """Correção manual do escopo (ADR-022 §4) — a passada de enriquecimento marca
+    conceitos como 'universal' automaticamente, mas o curador pode sempre reverter."""
+    payload = request.get_json(silent=True) or {}
+    scope = payload.get("scope")
+    if scope not in ("universal", "tematico"):
+        return jsonify({"error": "scope must be 'universal' or 'tematico'"}), 400
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                UPDATE editorial.concepts SET scope = %s
+                WHERE id = %s
+                RETURNING id, canonical_name, scope
+            """, (scope, concept_id))
+            row = cursor.fetchone()
+    if not row:
+        return jsonify({"error": "Concept not found"}), 404
+    return jsonify(row)
 
 
 @app.get("/concepts/<concept_id>/relations")
@@ -497,6 +595,125 @@ def get_segment(segment_id):
     if not row:
         return jsonify({"error": "Segment not found"}), 404
     return jsonify(strip_embedding(row))
+
+
+@app.get("/segments/<segment_id>/insights")
+@require_api_key
+def list_segment_insights(segment_id):
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT id FROM editorial.content_segments WHERE id = %s", (segment_id,))
+            if not cursor.fetchone():
+                return jsonify({"error": "Segment not found"}), 404
+            cursor.execute("""
+                SELECT * FROM editorial.segment_insights
+                WHERE segment_id = %s
+                ORDER BY generated_at
+            """, (segment_id,))
+            rows = cursor.fetchall()
+    return jsonify(rows)
+
+
+@app.post("/segments/<segment_id>/insights")
+@require_api_key
+def generate_segment_insight_cards(segment_id):
+    """Gera cartões de insight sob demanda (ADR-022 §2) — nunca em lote automático.
+    Nasce sempre em status 'suggested': o curador decide revisar ou descartar."""
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT id, full_text FROM editorial.content_segments WHERE id = %s", (segment_id,))
+            segment = cursor.fetchone()
+            if not segment:
+                return jsonify({"error": "Segment not found"}), 404
+
+            cursor.execute("""
+                SELECT c.id, c.canonical_name
+                FROM editorial.concepts c
+                JOIN editorial.segment_concepts sc ON sc.concept_id = c.id
+                WHERE sc.segment_id = %s
+            """, (segment_id,))
+            existing_concepts = cursor.fetchall()
+            existing_names = [c["canonical_name"] for c in existing_concepts]
+
+            insights, relations = generate_segment_insights(segment["full_text"], existing_names)
+            if not insights:
+                return jsonify({"error": "Failed to generate insights"}), 502
+
+            all_related_names = set()
+            for insight in insights:
+                all_related_names.update(insight.get("related_concepts") or [])
+            sync_concepts(cursor, sorted(all_related_names), segment_id=segment_id)
+
+            cursor.execute("""
+                SELECT c.id, c.canonical_name
+                FROM editorial.concepts c
+                JOIN editorial.segment_concepts sc ON sc.concept_id = c.id
+                WHERE sc.segment_id = %s
+            """, (segment_id,))
+            name_to_id = {row["canonical_name"]: row["id"] for row in cursor.fetchall()}
+
+            created = []
+            for insight in insights:
+                cursor.execute("""
+                    INSERT INTO editorial.segment_insights (
+                        segment_id, concept_title, explanation, philosophical_context,
+                        practical_application, related_concepts, model
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    RETURNING *
+                """, (
+                    segment_id,
+                    (insight.get("concept_title") or "")[:500],
+                    insight.get("explanation") or "",
+                    insight.get("philosophical_context") or "",
+                    insight.get("practical_application") or "",
+                    Json(insight.get("related_concepts") or []),
+                    CHAT_MODEL,
+                ))
+                created.append(cursor.fetchone())
+
+            if name_to_id:
+                cursor.execute("""
+                    UPDATE editorial.concepts
+                    SET scope = 'universal'
+                    WHERE id = ANY(%s::uuid[]) AND scope = 'tematico'
+                """, (list(name_to_id.values()),))
+
+            apply_relation_types(cursor, name_to_id, relations)
+
+    return jsonify(serialize_rows(created)), 201
+
+
+@app.post("/segment-insights/<insight_id>/review")
+@require_api_key
+def review_segment_insight(insight_id):
+    """Gate humano (ADR-022 §2) — marca um cartão de insight como revisado pelo curador."""
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                UPDATE editorial.segment_insights SET status = 'reviewed'
+                WHERE id = %s
+                RETURNING *
+            """, (insight_id,))
+            row = cursor.fetchone()
+    if not row:
+        return jsonify({"error": "Segment insight not found"}), 404
+    return jsonify(row)
+
+
+@app.post("/segment-insights/<insight_id>/dismiss")
+@require_api_key
+def dismiss_segment_insight(insight_id):
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                UPDATE editorial.segment_insights SET status = 'dismissed'
+                WHERE id = %s
+                RETURNING *
+            """, (insight_id,))
+            row = cursor.fetchone()
+    if not row:
+        return jsonify({"error": "Segment insight not found"}), 404
+    return jsonify(row)
 
 
 @app.post("/knowledge-cards")

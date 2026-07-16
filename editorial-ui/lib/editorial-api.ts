@@ -101,8 +101,22 @@ export type Concept = {
   description: string | null;
   importance_score: number;
   importance_level: string;
+  scope: "universal" | "tematico";
   segment_count: number;
   card_count: number;
+};
+
+export type SegmentInsight = {
+  id: string;
+  segment_id: string;
+  concept_title: string;
+  explanation: string;
+  philosophical_context: string;
+  practical_application: string;
+  related_concepts: string[];
+  status: "suggested" | "reviewed" | "dismissed";
+  generated_at: string;
+  model: string;
 };
 
 export type ConceptRelation = {
@@ -246,6 +260,29 @@ export function getConceptRelations(conceptId: string) {
   return request<{ concept: { id: string; canonical_name: string }; relations: ConceptRelation[] }>(
     `/concepts/${conceptId}/relations`
   );
+}
+
+export function listSegmentInsights(segmentId: string) {
+  return request<SegmentInsight[]>(`/segments/${segmentId}/insights`);
+}
+
+export function generateSegmentInsights(segmentId: string) {
+  return request<SegmentInsight[]>(`/segments/${segmentId}/insights`, { method: "POST" });
+}
+
+export function reviewSegmentInsight(id: string) {
+  return request<SegmentInsight>(`/segment-insights/${id}/review`, { method: "POST" });
+}
+
+export function dismissSegmentInsight(id: string) {
+  return request<SegmentInsight>(`/segment-insights/${id}/dismiss`, { method: "POST" });
+}
+
+export function setConceptScope(id: string, scope: "universal" | "tematico") {
+  return request<{ id: string; canonical_name: string; scope: string }>(`/concepts/${id}/scope`, {
+    method: "POST",
+    body: { scope },
+  });
 }
 
 export function searchArchive(query: string, opts: { limit?: number; include?: string[] } = {}) {
