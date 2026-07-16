@@ -12,6 +12,7 @@ import {
 } from "@/lib/actions";
 import SourceResultCard from "./SourceResultCard";
 import StatusBadge from "./StatusBadge";
+import TransitionEditor from "./TransitionEditor";
 
 type LocalSource = {
   key: string;
@@ -205,6 +206,28 @@ export default function ChapterBuilder({
       setMessage(result.ok ? "Fontes salvas." : `Erro ao salvar: ${result.error}`);
       router.refresh();
     });
+  }
+
+  function addTransitionBlock() {
+    setSources((prev) => [
+      ...prev,
+      {
+        key: `new-transition-${Date.now()}`,
+        segment_id: null,
+        knowledge_card_id: null,
+        inclusion_type: "transition_context",
+        content: "",
+        title: "Bloco de transição",
+        snippet: null,
+        fullText: null,
+        segmentType: null,
+        isChanneled: null,
+      },
+    ]);
+  }
+
+  function updateTransitionContent(key: string, text: string) {
+    setSources((prev) => prev.map((s) => (s.key === key ? { ...s, content: text } : s)));
   }
 
   function handlePropose() {
@@ -416,6 +439,14 @@ export default function ChapterBuilder({
             <div className="flex gap-2">
               <button
                 type="button"
+                onClick={addTransitionBlock}
+                disabled={isPending}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:hover:bg-gray-800"
+              >
+                + Bloco de transição
+              </button>
+              <button
+                type="button"
                 onClick={handlePropose}
                 disabled={isPending}
                 className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:hover:bg-gray-800"
@@ -435,40 +466,71 @@ export default function ChapterBuilder({
           </div>
 
           <div className="flex flex-col gap-2">
-            {sources.map((source, index) => (
-              <SourceResultCard
-                key={source.key}
-                kind={source.segment_id ? "segment" : "knowledge_card"}
-                segmentId={source.segment_id}
-                title={source.title}
-                snippet={source.snippet}
-                fullText={source.fullText}
-                segmentType={source.segmentType}
-                isChanneled={source.isChanneled}
-                actionLabel="Remover"
-                onAction={() => removeSource(source.key)}
-                extra={
-                  <div className="mt-1 flex gap-2 text-xs text-gray-500">
-                    <button
-                      type="button"
-                      onClick={() => moveSource(source.key, -1)}
-                      disabled={index === 0}
-                      className="hover:underline disabled:opacity-30"
-                    >
-                      ↑ mover para cima
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => moveSource(source.key, 1)}
-                      disabled={index === sources.length - 1}
-                      className="hover:underline disabled:opacity-30"
-                    >
-                      ↓ mover para baixo
-                    </button>
+            {sources.map((source, index) => {
+              const moveControls = (
+                <div className="flex gap-2 text-xs text-gray-500">
+                  <button
+                    type="button"
+                    onClick={() => moveSource(source.key, -1)}
+                    disabled={index === 0}
+                    className="hover:underline disabled:opacity-30"
+                  >
+                    ↑ mover para cima
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => moveSource(source.key, 1)}
+                    disabled={index === sources.length - 1}
+                    className="hover:underline disabled:opacity-30"
+                  >
+                    ↓ mover para baixo
+                  </button>
+                </div>
+              );
+
+              if (source.inclusion_type === "transition_context") {
+                return (
+                  <div
+                    key={source.key}
+                    className="rounded-md border border-gray-200 p-3 text-sm dark:border-gray-800"
+                  >
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+                        Transição — texto próprio
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeSource(source.key)}
+                        className="shrink-0 rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+                      >
+                        Remover
+                      </button>
+                    </div>
+                    <TransitionEditor
+                      value={source.content}
+                      onChange={(text) => updateTransitionContent(source.key, text)}
+                    />
+                    <div className="mt-1">{moveControls}</div>
                   </div>
-                }
-              />
-            ))}
+                );
+              }
+
+              return (
+                <SourceResultCard
+                  key={source.key}
+                  kind={source.segment_id ? "segment" : "knowledge_card"}
+                  segmentId={source.segment_id}
+                  title={source.title}
+                  snippet={source.snippet}
+                  fullText={source.fullText}
+                  segmentType={source.segmentType}
+                  isChanneled={source.isChanneled}
+                  actionLabel="Remover"
+                  onAction={() => removeSource(source.key)}
+                  extra={<div className="mt-1">{moveControls}</div>}
+                />
+              );
+            })}
             {sources.length === 0 && (
               <p className="rounded-md border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700">
                 Nenhuma fonte ainda. Adicione a partir do painel de exploração à esquerda.

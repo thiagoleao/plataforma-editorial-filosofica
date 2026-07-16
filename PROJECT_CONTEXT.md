@@ -133,11 +133,12 @@ Evolução da `editorial-ui` pedida pelo usuário: acesso hospedado com login, s
 - ADR-019 — ver "ADRs implementadas" acima (implementada, movida daqui em 2026-07-16).
 
 **Em andamento (2026-07-16):**
-- [ADR-020](./docs/adr/ADR-020.md) — Editor de Manuscrito com Preservação de Blocos Literais. **Aprovada, implementação em curso.** Editor rico (Tiptap) em duas fases — Fase A: edição de transições no `ChapterBuilder` (em andamento); Fase B: manuscrito contínuo por capítulo com blocos de canalização travados (trava dupla: cliente + verificação server-side), ainda não iniciada.
+- [ADR-020](./docs/adr/ADR-020.md) — Editor de Manuscrito com Preservação de Blocos Literais. **Fase A implementada** — edição rica (Tiptap) de blocos de transição no `ChapterBuilder`, salvamento manual (autosave foi tentado, causou um loop de re-save real contra produção — ver nota de implementação — e foi removido). Fase B (manuscrito contínuo com blocos de canalização travados) ainda não iniciada.
 
 Decisões explicitamente pendentes (não devem ser assumidas silenciosamente em implementação futura):
 - **Resolvido em 2026-07-16:** ADR-022 §1 (fichas higienizadas) — ver nota de implementação na ADR. Fica pendente apenas a revisão manual editorial das 8 fichas sinalizadas pelo reprocessamento (`create_card=false` no novo julgamento) — decisão de curadoria, não técnica.
 - **Débito técnico (ADR-018, 2026-07-15):** acesso hospedado sem CLI para `editorial-ui` continua pendente. Próxima tentativa: autenticação usuário/senha controlada pela própria aplicação (não OAuth de terceiro) — decisão explícita do usuário após o NextAuth+Google esbarrar em bloqueio de política de organização do GCP e num conflito estrutural entre IAM do Cloud Run e callback OAuth. Ver nota de implementação da ADR-018.
+- **Autosave revertido (ADR-020 Fase A, 2026-07-16):** debounce de autosave nos blocos de transição causou um loop real de re-save contra a API de produção (30 revisões redundantes geradas e depois limpas — ver nota de implementação). Removido; Fase A usa só o botão "Salvar" manual. Se autosave for retomado no futuro, investigar antes por que `router.refresh()` nesta versão do Next.js (16.2.10) dispara esse comportamento.
 - Levantamento das consciências canalizadas distintas do acervo (ADR-011 §3) — hoje só existe o marcador genérico "consciência canalizada".
 - **Resolvido em 2026-07-15:** as 2 fontes de reconciliação (`1JIkgLfQwuJS4JAabs6MdYsh87n5Xqsn9`, `1xiWXBdza2Xi05RhmXekutYk9KrJNsWfK`) estavam bloqueadas por dois problemas reais, ambos corrigidos — ver nota de implementação na ADR-011 e [docs/N8N_FLUXOS.md](./docs/N8N_FLUXOS.md) para detalhes. Continuam com `processing_status: pending` porque o Fluxo 02 processa 1 arquivo por execução entre ~106 pendentes; devem ser pegas naturalmente pelo agendamento de 2 em 2 horas, sem ação adicional necessária.
 - Reescrever o Fluxo 03 para gravar via Editorial API antes de republicá-lo (hoje despublicado).
@@ -207,7 +208,7 @@ LIVRO/  (remoto GitHub: plataforma-editorial-filosofica)
 │       ├── ADR-017.md          # APROVADA — processo: planejar → ADR → aprovar → desenvolver
 │       ├── ADR-018.md          # REJEITADA NA IMPLEMENTAÇÃO — acesso público via NextAuth (revertido, ver nota)
 │       ├── ADR-019.md          # IMPLEMENTADA — sugestões automáticas de capítulos + fluxo n8n agendado
-│       ├── ADR-020.md          # APROVADA (implementação em curso) — editor de manuscrito com preservação de blocos literais
+│       ├── ADR-020.md          # FASE A IMPLEMENTADA — edição de transições (Tiptap); Fase B (manuscrito travado) não iniciada
 │       ├── ADR-021.md          # PROPOSTA — refresh de design (shadcn/ui)
 │       ├── ADR-022.md          # IMPLEMENTADA — fichas higienizadas, cartões de insight, relações tipadas, escopo de conceito
 │       └── originais/          # documentos-fonte em Word (ADR 009.docx, ADR 010.docx, Arquitetura da Plataforma Editorial.docx) — versões originais que deram origem aos .md acima

@@ -4,8 +4,8 @@
     {
       "name": "editorial-ui",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "editorial-ui"],
-      "port": 3000
+      "runtimeArgs": ["run", "dev", "--prefix", "editorial-ui", "--", "--port", "3100"],
+      "port": 3100
     }
   ]
 }

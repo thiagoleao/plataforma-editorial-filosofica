@@ -11,7 +11,9 @@ const nextConfig: NextConfig = {
       // do Next.js para Server Actions rejeita toda requisição de mutação.
       // Ver nota de implementação da ADR-016. A tentativa da ADR-018 de eliminar
       // essa necessidade (acesso público) foi revertida — ver ADR-018.
-      allowedOrigins: ["localhost:8081"],
+      // 3100 é só para `npm run dev` local (Server Actions também passam pela mesma
+      // checagem de Origin em dev) — não usado em produção.
+      allowedOrigins: ["localhost:8081", "localhost:3100"],
     },
   },
 };
