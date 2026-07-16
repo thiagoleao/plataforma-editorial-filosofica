@@ -128,10 +128,12 @@ Plano para viabilizar a geração de capítulos de livro com qualidade, a partir
 Evolução da `editorial-ui` pedida pelo usuário: acesso hospedado com login, sugestões automáticas de capítulo, editor de manuscrito, design. Segue o processo da [ADR-017](./docs/adr/ADR-017.md) — as ADRs abaixo foram registradas antes de cada implementação começar. **Ordem de execução real** (não é a ordem numérica): 018 (rejeitada/revertida) → 022 → 019 → 020 → 021 (rollout distribuído) — 022 vem antes de 019 porque a qualidade das sugestões de capítulo depende de fichas/conceitos melhores. Plano original em `~/.claude/plans/sunny-hugging-leaf.md` (não cobre a ADR-022, adicionada depois numa conversa de enriquecimento de conteúdo).
 
 - [ADR-018](./docs/adr/ADR-018.md) — Acesso Público Autenticado (NextAuth + Google OAuth). **Rejeitada na implementação (2026-07-15) e revertida** — dois bloqueios reais: (1) política de organização do GCP impede IAM para qualquer identidade fora do domínio, inclusive `allUsers` e a conta pessoal específica; (2) mesmo restrito a uma única conta da organização, o callback do OAuth é um redirecionamento feito pelos servidores do Google direto para o Cloud Run, que não passa pelo túnel do `gcloud run services proxy` e esbarra no IAM — conflito estrutural entre IAM do Cloud Run (feito para máquina-a-máquina) e login interativo via navegador. `editorial-ui` voltou ao modelo da ADR-016. Débito técnico: próxima tentativa deve ser autenticação usuário/senha controlada pela aplicação, não OAuth de terceiro. Ver nota de implementação na ADR.
-- [ADR-020](./docs/adr/ADR-020.md) — Editor de Manuscrito com Preservação de Blocos Literais. Editor rico (Tiptap) em duas fases — edição de transições, depois um manuscrito contínuo por capítulo com blocos de canalização travados (trava dupla: cliente + verificação server-side).
 - [ADR-021](./docs/adr/ADR-021.md) — Refresh de Design (shadcn/ui). Sem fase de rollout isolada — aplicado dentro do trabalho das ADR-018 a 020.
 - ADR-022 — ver "ADRs implementadas" acima (implementada, movida daqui em 2026-07-15/16).
 - ADR-019 — ver "ADRs implementadas" acima (implementada, movida daqui em 2026-07-16).
+
+**Em andamento (2026-07-16):**
+- [ADR-020](./docs/adr/ADR-020.md) — Editor de Manuscrito com Preservação de Blocos Literais. **Aprovada, implementação em curso.** Editor rico (Tiptap) em duas fases — Fase A: edição de transições no `ChapterBuilder` (em andamento); Fase B: manuscrito contínuo por capítulo com blocos de canalização travados (trava dupla: cliente + verificação server-side), ainda não iniciada.
 
 Decisões explicitamente pendentes (não devem ser assumidas silenciosamente em implementação futura):
 - **Resolvido em 2026-07-16:** ADR-022 §1 (fichas higienizadas) — ver nota de implementação na ADR. Fica pendente apenas a revisão manual editorial das 8 fichas sinalizadas pelo reprocessamento (`create_card=false` no novo julgamento) — decisão de curadoria, não técnica.
@@ -205,7 +207,7 @@ LIVRO/  (remoto GitHub: plataforma-editorial-filosofica)
 │       ├── ADR-017.md          # APROVADA — processo: planejar → ADR → aprovar → desenvolver
 │       ├── ADR-018.md          # REJEITADA NA IMPLEMENTAÇÃO — acesso público via NextAuth (revertido, ver nota)
 │       ├── ADR-019.md          # IMPLEMENTADA — sugestões automáticas de capítulos + fluxo n8n agendado
-│       ├── ADR-020.md          # PROPOSTA — editor de manuscrito com preservação de blocos literais
+│       ├── ADR-020.md          # APROVADA (implementação em curso) — editor de manuscrito com preservação de blocos literais
 │       ├── ADR-021.md          # PROPOSTA — refresh de design (shadcn/ui)
 │       ├── ADR-022.md          # IMPLEMENTADA — fichas higienizadas, cartões de insight, relações tipadas, escopo de conceito
 │       └── originais/          # documentos-fonte em Word (ADR 009.docx, ADR 010.docx, Arquitetura da Plataforma Editorial.docx) — versões originais que deram origem aos .md acima
