@@ -115,6 +115,7 @@ Endpoints implementados (`editorial-api/main.py`):
 - [ADR-016](./docs/adr/ADR-016.md) — Curadoria Manual como Fluxo Principal. **Implementada em 2026-07-15.** Novo serviço `editorial-ui` (Next.js, Cloud Run, IAM) para navegar o acervo e montar capítulos manualmente — inverte a ênfase da ADR-013 (`/propose` deixa de ser o caminho natural e passa a ser atalho opcional). Nenhuma mudança de schema/endpoint. Ver nota de implementação na ADR.
 - [ADR-017](./docs/adr/ADR-017.md) — Processo: Planejar, Registrar ADR, Só Depois Desenvolver. **Aprovada em 2026-07-15.** Formaliza a ordem obrigatória para toda mudança não-trivial a partir de agora: planejar → ADR em status "Proposta" → aprovação explícita → desenvolvimento guiado pela ADR → nota de implementação.
 - [ADR-022](./docs/adr/ADR-022.md) — Camada de Enriquecimento: Cartões de Insight e Relações Tipadas de Conceito. **Parcialmente implementada em 2026-07-15** — §2 (cartões de insight filosófico por segmento, `editorial.segment_insights`, geração sob demanda via chat completion), §3 (completa a ADR-012 §2: tipagem de `concept_relations` por LLM) e §4 (`editorial.concepts.scope` universal/temático) no ar, testados em produção via `editorial-ui`. §1 (fichas higienizadas — prompt do Fluxo 02 no n8n + reprocessamento em lote) segue pendente, fora do repositório. Ver nota de implementação na ADR.
+- [ADR-019](./docs/adr/ADR-019.md) — Sugestões Automáticas de Capítulos. **Implementada em 2026-07-16.** Novo pipeline: `editorial.chapter_suggestions`, endpoints `GET/POST /chapter-suggestions*` (geração via chat completion `gpt-4.1-mini` para título/resumo do card, conteúdo proposto sempre blocos literais/fichas originais), promoção transacional para capítulo real, páginas `/chapter-suggestions` na `editorial-ui`. Fluxo n8n "04 - Sugestões Automáticas de Capítulo" (Schedule Trigger semanal → `POST /chapter-suggestions/generate`) publicado e ativo. Primeira vez que o projeto usa geração de texto (chat completion) da OpenAI, compartilhada com a ADR-022. Ver nota de implementação na ADR.
 
 ## Roadmap de ADRs propostas (2026-07-14)
 
@@ -127,10 +128,10 @@ Plano para viabilizar a geração de capítulos de livro com qualidade, a partir
 Evolução da `editorial-ui` pedida pelo usuário: acesso hospedado com login, sugestões automáticas de capítulo, editor de manuscrito, design. Segue o processo da [ADR-017](./docs/adr/ADR-017.md) — as ADRs abaixo foram registradas antes de cada implementação começar. **Ordem de execução real** (não é a ordem numérica): 018 (rejeitada/revertida) → 022 → 019 → 020 → 021 (rollout distribuído) — 022 vem antes de 019 porque a qualidade das sugestões de capítulo depende de fichas/conceitos melhores. Plano original em `~/.claude/plans/sunny-hugging-leaf.md` (não cobre a ADR-022, adicionada depois numa conversa de enriquecimento de conteúdo).
 
 - [ADR-018](./docs/adr/ADR-018.md) — Acesso Público Autenticado (NextAuth + Google OAuth). **Rejeitada na implementação (2026-07-15) e revertida** — dois bloqueios reais: (1) política de organização do GCP impede IAM para qualquer identidade fora do domínio, inclusive `allUsers` e a conta pessoal específica; (2) mesmo restrito a uma única conta da organização, o callback do OAuth é um redirecionamento feito pelos servidores do Google direto para o Cloud Run, que não passa pelo túnel do `gcloud run services proxy` e esbarra no IAM — conflito estrutural entre IAM do Cloud Run (feito para máquina-a-máquina) e login interativo via navegador. `editorial-ui` voltou ao modelo da ADR-016. Débito técnico: próxima tentativa deve ser autenticação usuário/senha controlada pela aplicação, não OAuth de terceiro. Ver nota de implementação na ADR.
-- [ADR-019](./docs/adr/ADR-019.md) — Sugestões Automáticas de Capítulos (renomeada em 2026-07-15, era "Insights Automáticos" — colidia com o termo "insight" da ADR-022). Novo pipeline assíncrono (fluxo n8n agendado) que varre o acervo e sugere capítulos candidatos como cards — primeira vez que o projeto usa geração de texto (chat completion) da OpenAI, não só embeddings. Inclui o sinal de "aprendizado de estilo" (escopo aprovado pelo usuário: só estrutura/curadoria, nunca prosa nova). **Depende da ADR-022 — deve ser implementada depois dela**, apesar do número menor.
 - [ADR-020](./docs/adr/ADR-020.md) — Editor de Manuscrito com Preservação de Blocos Literais. Editor rico (Tiptap) em duas fases — edição de transições, depois um manuscrito contínuo por capítulo com blocos de canalização travados (trava dupla: cliente + verificação server-side).
 - [ADR-021](./docs/adr/ADR-021.md) — Refresh de Design (shadcn/ui). Sem fase de rollout isolada — aplicado dentro do trabalho das ADR-018 a 020.
 - ADR-022 — ver "ADRs implementadas" acima (parcialmente implementada, movida daqui em 2026-07-15).
+- ADR-019 — ver "ADRs implementadas" acima (implementada, movida daqui em 2026-07-16).
 
 Decisões explicitamente pendentes (não devem ser assumidas silenciosamente em implementação futura):
 - **ADR-022 §1 (fichas higienizadas), 2026-07-15:** prompt novo para o Fluxo 02 (n8n, fora do repositório) + reprocessamento em lote das ~76 fichas existentes, reaproveitando `card_revisions`. Não deve ser feito silenciosamente — sessão própria, dado que edita um fluxo em produção.
@@ -203,7 +204,7 @@ LIVRO/  (remoto GitHub: plataforma-editorial-filosofica)
 │       ├── ADR-016.md          # IMPLEMENTADA — curadoria manual como fluxo principal (editorial-ui)
 │       ├── ADR-017.md          # APROVADA — processo: planejar → ADR → aprovar → desenvolver
 │       ├── ADR-018.md          # REJEITADA NA IMPLEMENTAÇÃO — acesso público via NextAuth (revertido, ver nota)
-│       ├── ADR-019.md          # PROPOSTA — sugestões automáticas de capítulos (depende da ADR-022)
+│       ├── ADR-019.md          # IMPLEMENTADA — sugestões automáticas de capítulos + fluxo n8n agendado
 │       ├── ADR-020.md          # PROPOSTA — editor de manuscrito com preservação de blocos literais
 │       ├── ADR-021.md          # PROPOSTA — refresh de design (shadcn/ui)
 │       ├── ADR-022.md          # PARCIALMENTE IMPLEMENTADA — cartões de insight/relações tipadas no ar; fichas higienizadas (§1) pendente
@@ -220,9 +221,10 @@ LIVRO/  (remoto GitHub: plataforma-editorial-filosofica)
 │   ├── migration_adr_013.sql
 │   ├── migration_adr_014.sql
 │   ├── migration_adr_022.sql
+│   ├── migration_adr_019.sql
 │   └── DEPLOY_ADR-011.md
 ├── editorial-ui/                # Interface de curadoria (Next.js), deploy no Cloud Run — ver ADR-016
-│   ├── app/                     # rotas: /, /projects/[projectId], /projects/[projectId]/chapters/[chapterId], /projects/[projectId]/duplicate-report
+│   ├── app/                     # rotas: /, /projects/[projectId], /projects/[projectId]/chapters/[chapterId], /projects/[projectId]/duplicate-report, /chapter-suggestions, /chapter-suggestions/[suggestionId]
 │   ├── lib/editorial-api.ts     # cliente server-only para a editorial-api
 │   ├── lib/actions.ts           # Server Actions (criar projeto/capítulo, salvar fontes, aprovar, revisar)
 │   ├── components/

@@ -3,6 +3,9 @@ const STATUS_STYLES: Record<string, string> = {
   assembled: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
   reviewed: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
   final: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  suggested: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+  dismissed: "bg-gray-200 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+  promoted: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -10,6 +13,9 @@ const STATUS_LABELS: Record<string, string> = {
   assembled: "Montado",
   reviewed: "Revisado",
   final: "Final",
+  suggested: "Sugerido",
+  dismissed: "Descartado",
+  promoted: "Promovido",
 };
 
 export default function StatusBadge({ status }: { status: string }) {

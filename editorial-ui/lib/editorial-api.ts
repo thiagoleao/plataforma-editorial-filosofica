@@ -228,6 +228,22 @@ export type DuplicateReport = {
   conflicts: DuplicateConflict[];
 };
 
+export type ChapterSuggestionSummary = {
+  id: string;
+  title: string;
+  summary: string;
+  thematic_scope: string[];
+  status: "suggested" | "dismissed" | "promoted";
+  generated_at: string;
+};
+
+export type ChapterSuggestionDetail = ChapterSuggestionSummary & {
+  proposed_sources: ChapterSourceInput[];
+  promoted_chapter_id: string | null;
+  model: string;
+  sources: ChapterSource[];
+};
+
 // ---------- Leitura / navegação do acervo ----------
 
 export function listSegments(params: {
@@ -354,4 +370,28 @@ export function getDuplicateReport(bookProjectId: string, threshold = 0.9) {
   return request<DuplicateReport>(`/book-projects/${bookProjectId}/duplicate-report`, {
     searchParams: { threshold },
   });
+}
+
+// ---------- Sugestões automáticas de capítulo (ADR-019) ----------
+
+export function listChapterSuggestions() {
+  return request<ChapterSuggestionSummary[]>("/chapter-suggestions");
+}
+
+export function getChapterSuggestion(id: string) {
+  return request<ChapterSuggestionDetail>(`/chapter-suggestions/${id}`);
+}
+
+export function promoteChapterSuggestion(
+  id: string,
+  input: { book_project_id: string; chapter_order?: number; title?: string }
+) {
+  return request<ChapterDetail>(`/chapter-suggestions/${id}/promote`, {
+    method: "POST",
+    body: input,
+  });
+}
+
+export function dismissChapterSuggestion(id: string) {
+  return request<ChapterSuggestionSummary>(`/chapter-suggestions/${id}/dismiss`, { method: "POST" });
 }

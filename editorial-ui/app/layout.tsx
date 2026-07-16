@@ -37,6 +37,14 @@ export default function RootLayout({
             <span className="text-sm text-gray-500 dark:text-gray-400">
               Plataforma Editorial Filosófica
             </span>
+            <nav className="ml-auto flex items-center gap-4 text-sm">
+              <Link href="/" className="hover:underline">
+                Projetos
+              </Link>
+              <Link href="/chapter-suggestions" className="hover:underline">
+                Sugestões
+              </Link>
+            </nav>
           </div>
         </header>
         <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">{children}</main>

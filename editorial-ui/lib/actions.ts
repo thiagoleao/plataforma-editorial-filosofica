@@ -105,6 +105,28 @@ export async function runConsolidationCheckAction(
   }
 }
 
+export async function promoteChapterSuggestionAction(suggestionId: string, formData: FormData) {
+  // redirect() lança um erro interno do Next.js (NEXT_REDIRECT) — nunca envolver em
+  // try/catch, senão ele é engolido e tratado como falha real (ver createChapterAction).
+  const bookProjectId = String(formData.get("book_project_id") ?? "").trim();
+  if (!bookProjectId) throw new Error("Selecione um projeto");
+  const chapterOrderRaw = String(formData.get("chapter_order") ?? "").trim();
+
+  const chapter = await api.promoteChapterSuggestion(suggestionId, {
+    book_project_id: bookProjectId,
+    chapter_order: chapterOrderRaw ? Number(chapterOrderRaw) : undefined,
+  });
+  revalidatePath("/chapter-suggestions");
+  revalidatePath(`/projects/${bookProjectId}`);
+  redirect(`/projects/${bookProjectId}/chapters/${chapter.id}`);
+}
+
+export async function dismissChapterSuggestionAction(suggestionId: string) {
+  await api.dismissChapterSuggestion(suggestionId);
+  revalidatePath("/chapter-suggestions");
+  redirect("/chapter-suggestions");
+}
+
 export async function generateSegmentInsightsAction(
   segmentId: string
 ): Promise<{ ok: true; data: api.SegmentInsight[] } | { ok: false; error: string }> {

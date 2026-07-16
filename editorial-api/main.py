@@ -128,6 +128,178 @@ def apply_relation_types(cursor, name_to_id, relations):
         """, {"a": id_a, "b": id_b, "relation_type": relation_type})
 
 
+CHAPTER_SUGGESTION_SYSTEM_PROMPT = """Você é um assistente editorial que sugere título e \
+resumo curtos para um capítulo candidato de livro, a partir de um conceito central e uma \
+lista de títulos de fontes (segmentos canalizados e fichas) já selecionadas para esse \
+capítulo. Você não lê o conteúdo integral das fontes — só os títulos, fornecidos abaixo — \
+e nunca gera nem sugere texto para o corpo do capítulo em si, só a etiqueta editorial.
+
+Responda em português, em JSON estrito: {"title": "...", "summary": "..."}
+O title é curto (até 8 palavras). O summary é 1-2 frases descrevendo do que trata o \
+capítulo candidato, para alguém decidir se vale promover essa sugestão para um projeto real."""
+
+
+def generate_chapter_suggestion_label(concept_name, source_titles):
+    """Gera título + resumo curtos para um capítulo candidato via chat completion
+    (ADR-019 §4). Retorna (None, None) em caso de falha — nunca bloqueia o lote inteiro."""
+    user_prompt = (
+        f"Conceito central: {concept_name}\n\nTítulos das fontes selecionadas:\n"
+        + "\n".join(f"- {title}" for title in source_titles)
+    )
+    try:
+        response = openai_client.chat.completions.create(
+            model=CHAT_MODEL,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": CHAPTER_SUGGESTION_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        data = json.loads(response.choices[0].message.content)
+        return data.get("title"), data.get("summary")
+    except Exception:
+        app.logger.exception("Failed to generate chapter suggestion label")
+        return None, None
+
+
+def build_proposed_sources(cursor, concept_ids, limit=20, min_importance=25, similarity_threshold=0.92):
+    """Monta uma lista ordenada de fontes candidatas (segmentos + fichas) para um escopo
+    de conceitos, com dedup por similaridade de embedding (ADR-013 §3). Reaproveitado por
+    /chapters/<id>/propose e pela geração de sugestões de capítulo (ADR-019 §4). Retorna
+    uma lista de tuplas (kind, id), kind em ('segment', 'card')."""
+    cursor.execute("""
+        SELECT DISTINCT cs.id AS segment_id, cs.is_channeled, cs.editorial_relevance, cs.embedding
+        FROM editorial.content_segments cs
+        JOIN editorial.segment_concepts sc ON sc.segment_id = cs.id
+        WHERE sc.concept_id = ANY(%s::uuid[])
+        ORDER BY cs.is_channeled DESC, cs.editorial_relevance DESC
+        LIMIT %s
+    """, (concept_ids, limit * 2))
+    segment_candidates = cursor.fetchall()
+
+    cursor.execute("""
+        SELECT DISTINCT kc.id AS card_id, kc.importance_score, kc.embedding
+        FROM editorial.knowledge_cards kc
+        JOIN editorial.card_concepts cc ON cc.card_id = kc.id
+        WHERE cc.concept_id = ANY(%s::uuid[]) AND kc.importance_score >= %s
+        ORDER BY kc.importance_score DESC
+        LIMIT %s
+    """, (concept_ids, min_importance, limit * 2))
+    card_candidates = cursor.fetchall()
+
+    kept = []
+    kept_embeddings = []
+
+    def try_keep(kind, item_id, embedding):
+        if len(kept) >= limit:
+            return
+        if embedding is not None and any(
+            cosine_similarity(embedding, other) >= similarity_threshold for other in kept_embeddings
+        ):
+            return
+        kept.append((kind, item_id))
+        kept_embeddings.append(embedding)
+
+    for row in segment_candidates:
+        try_keep("segment", row["segment_id"], row["embedding"])
+    for row in card_candidates:
+        try_keep("card", row["card_id"], row["embedding"])
+
+    return kept
+
+
+def find_chapter_suggestion_candidates(cursor, batch_size):
+    """Acha conceitos com boa cobertura de conteúdo mas pouco representados em capítulos
+    já existentes (ADR-019 §4) — subqueries escalares evitam o fan-out de fazer dois LEFT
+    JOIN (segmentos e fichas) na mesma query."""
+    cursor.execute("""
+        WITH concept_stats AS (
+            SELECT
+                c.id, c.canonical_name, c.importance_score,
+                (SELECT COUNT(*) FROM editorial.segment_concepts sc WHERE sc.concept_id = c.id) +
+                (SELECT COUNT(*) FROM editorial.card_concepts cc WHERE cc.concept_id = c.id) AS content_count,
+                (
+                    SELECT COUNT(DISTINCT cs.id) FROM editorial.chapter_sources cs
+                    WHERE cs.segment_id IN (SELECT segment_id FROM editorial.segment_concepts WHERE concept_id = c.id)
+                       OR cs.knowledge_card_id IN (SELECT card_id FROM editorial.card_concepts WHERE concept_id = c.id)
+                ) AS chapter_source_count
+            FROM editorial.concepts c
+            WHERE c.importance_level IN ('forte', 'pilar')
+        )
+        SELECT * FROM concept_stats
+        WHERE content_count >= 3
+        ORDER BY (content_count - chapter_source_count) DESC, importance_score DESC
+        LIMIT %s
+    """, (batch_size,))
+    return cursor.fetchall()
+
+
+def infer_preferred_chapter_size(cursor, default=15):
+    """Sinal de estilo (ADR-019 §5, escopo aprovado: só estrutura) — capítulos já
+    revisados por um humano indicam o tamanho típico que costuma funcionar. Nunca
+    influencia texto, só quantas fontes uma sugestão nova tenta reunir."""
+    cursor.execute("""
+        SELECT AVG(source_count)::int AS avg_size FROM (
+            SELECT ch.id, COUNT(cs.id) AS source_count
+            FROM editorial.chapters ch
+            JOIN editorial.chapter_sources cs ON cs.chapter_id = ch.id
+            WHERE ch.status = 'reviewed'
+            GROUP BY ch.id
+        ) sub
+    """)
+    row = cursor.fetchone()
+    return row["avg_size"] if row and row["avg_size"] else default
+
+
+def generate_chapter_suggestions_batch(cursor, batch_size=5):
+    """Gera um lote de sugestões de capítulo (ADR-019 §4-5). Nunca publica nada — só
+    grava em chapter_suggestions com status 'suggested', para revisão humana via
+    /chapter-suggestions/<id>/promote."""
+    candidates = find_chapter_suggestion_candidates(cursor, batch_size)
+    preferred_size = infer_preferred_chapter_size(cursor)
+    created = []
+
+    for candidate in candidates:
+        concept_id = str(candidate["id"])
+        kept = build_proposed_sources(cursor, [concept_id], limit=preferred_size)
+        if len(kept) < 2:
+            continue
+
+        source_titles = []
+        proposed_sources = []
+        for kind, item_id in kept:
+            if kind == "segment":
+                cursor.execute("SELECT title FROM editorial.content_segments WHERE id = %s", (item_id,))
+                row = cursor.fetchone()
+                source_titles.append(row["title"] if row else "(segmento)")
+                proposed_sources.append({
+                    "segment_id": str(item_id), "knowledge_card_id": None,
+                    "inclusion_type": "literal_segment", "content": None,
+                })
+            else:
+                cursor.execute("SELECT title FROM editorial.knowledge_cards WHERE id = %s", (item_id,))
+                row = cursor.fetchone()
+                source_titles.append(row["title"] if row else "(ficha)")
+                proposed_sources.append({
+                    "segment_id": None, "knowledge_card_id": str(item_id),
+                    "inclusion_type": "card_synthesis", "content": None,
+                })
+
+        title, summary = generate_chapter_suggestion_label(candidate["canonical_name"], source_titles)
+        if not title or not summary:
+            continue
+
+        cursor.execute("""
+            INSERT INTO editorial.chapter_suggestions
+                (title, summary, thematic_scope, proposed_sources, model)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING *
+        """, (title, summary, Json([concept_id]), Json(proposed_sources), CHAT_MODEL))
+        created.append(cursor.fetchone())
+
+    return created
+
+
 def require_api_key(function):
     @wraps(function)
     def decorated(*args, **kwargs):
@@ -225,6 +397,51 @@ def snapshot_chapter_revision(cursor, chapter, existing_sources):
         "sources_snapshot": Json(serialize_rows(existing_sources)),
     })
     cursor.execute("DELETE FROM editorial.chapter_sources WHERE chapter_id = %s", (chapter["id"],))
+
+
+def resolve_concept_ids(cursor, concept_names):
+    """Resolve nomes de conceito para IDs (ADR-011). Retorna (ids, nomes_desconhecidos) —
+    nunca cria conceito novo aqui (diferente de sync_concepts, usado na destilação)."""
+    concept_ids = []
+    unknown = []
+    for name in concept_names or []:
+        cursor.execute(
+            f"SELECT id FROM editorial.concepts WHERE normalized_key = {NORMALIZE_CONCEPT_KEY_SQL}",
+            (name,),
+        )
+        row = cursor.fetchone()
+        if row:
+            concept_ids.append(str(row["id"]))
+        else:
+            unknown.append(name)
+    return concept_ids, unknown
+
+
+def insert_chapter(cursor, book_project_id, chapter_order, title, concept_ids):
+    """Cria um capítulo (ADR-013). Extraído para ser reutilizável pela promoção de
+    sugestões (ADR-019 §2), que precisa disso na mesma transação que insere as sources."""
+    cursor.execute("""
+        INSERT INTO editorial.chapters (book_project_id, chapter_order, title, thematic_scope)
+        VALUES (%s, %s, %s, %s)
+        RETURNING *
+    """, (book_project_id, chapter_order, title, Json(concept_ids)))
+    return cursor.fetchone()
+
+
+def insert_chapter_sources(cursor, chapter_id, sources):
+    """Insere chapter_sources a partir de uma lista de dicts (ADR-013) — mesmo formato
+    usado por PUT /chapters/<id>/sources e pelos snapshots de chapter_revisions/
+    chapter_suggestions.proposed_sources. Não apaga sources existentes nem gera
+    revisão — isso é responsabilidade de quem chama (ver snapshot_chapter_revision)."""
+    for order, item in enumerate(sources, start=1):
+        cursor.execute("""
+            INSERT INTO editorial.chapter_sources
+                (chapter_id, segment_id, knowledge_card_id, source_order, inclusion_type, content)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (
+            chapter_id, item.get("segment_id"), item.get("knowledge_card_id"),
+            order, item["inclusion_type"], item.get("content"),
+        ))
 
 
 def sync_concepts(cursor, concept_texts, segment_id=None, card_id=None):
@@ -1047,27 +1264,11 @@ def create_chapter(book_project_id):
             if not cursor.fetchone():
                 return jsonify({"error": "Book project not found"}), 404
 
-            concept_ids = []
-            unknown_concepts = []
-            for name in payload.get("thematic_scope", []):
-                cursor.execute(
-                    f"SELECT id FROM editorial.concepts WHERE normalized_key = {NORMALIZE_CONCEPT_KEY_SQL}",
-                    (name,),
-                )
-                row = cursor.fetchone()
-                if row:
-                    concept_ids.append(str(row["id"]))
-                else:
-                    unknown_concepts.append(name)
+            concept_ids, unknown_concepts = resolve_concept_ids(cursor, payload.get("thematic_scope", []))
             if unknown_concepts:
                 return jsonify({"error": "Unknown concepts", "concepts": unknown_concepts}), 400
 
-            cursor.execute("""
-                INSERT INTO editorial.chapters (book_project_id, chapter_order, title, thematic_scope)
-                VALUES (%s, %s, %s, %s)
-                RETURNING *
-            """, (book_project_id, payload["chapter_order"], payload["title"], Json(concept_ids)))
-            chapter = cursor.fetchone()
+            chapter = insert_chapter(cursor, book_project_id, payload["chapter_order"], payload["title"], concept_ids)
     return jsonify(chapter), 201
 
 
@@ -1105,43 +1306,7 @@ def propose_chapter_sources(chapter_id):
             if not concept_ids:
                 return jsonify({"error": "Chapter has empty thematic_scope"}), 400
 
-            cursor.execute("""
-                SELECT DISTINCT cs.id AS segment_id, cs.is_channeled, cs.editorial_relevance, cs.embedding
-                FROM editorial.content_segments cs
-                JOIN editorial.segment_concepts sc ON sc.segment_id = cs.id
-                WHERE sc.concept_id = ANY(%s::uuid[])
-                ORDER BY cs.is_channeled DESC, cs.editorial_relevance DESC
-                LIMIT %s
-            """, (concept_ids, limit * 2))
-            segment_candidates = cursor.fetchall()
-
-            cursor.execute("""
-                SELECT DISTINCT kc.id AS card_id, kc.importance_score, kc.embedding
-                FROM editorial.knowledge_cards kc
-                JOIN editorial.card_concepts cc ON cc.card_id = kc.id
-                WHERE cc.concept_id = ANY(%s::uuid[]) AND kc.importance_score >= %s
-                ORDER BY kc.importance_score DESC
-                LIMIT %s
-            """, (concept_ids, min_importance, limit * 2))
-            card_candidates = cursor.fetchall()
-
-            kept = []
-            kept_embeddings = []
-
-            def try_keep(kind, item_id, embedding):
-                if len(kept) >= limit:
-                    return
-                if embedding is not None and any(
-                    cosine_similarity(embedding, other) >= similarity_threshold for other in kept_embeddings
-                ):
-                    return
-                kept.append((kind, item_id))
-                kept_embeddings.append(embedding)
-
-            for row in segment_candidates:
-                try_keep("segment", row["segment_id"], row["embedding"])
-            for row in card_candidates:
-                try_keep("card", row["card_id"], row["embedding"])
+            kept = build_proposed_sources(cursor, concept_ids, limit, min_importance, similarity_threshold)
 
             snapshot_chapter_revision(
                 cursor, chapter,
@@ -1164,6 +1329,127 @@ def propose_chapter_sources(chapter_id):
             cursor.execute("UPDATE editorial.chapters SET updated_at = NOW() WHERE id = %s", (chapter_id,))
             result = build_chapter_detail(cursor, chapter_id)
     return jsonify(result)
+
+
+@app.post("/chapter-suggestions/generate")
+@require_api_key
+def generate_chapter_suggestions():
+    """Service-only (ADR-019 §6) — disparado pelo fluxo agendado do n8n, nunca pela
+    UI. Nunca publica nada sozinho: só cria linhas em chapter_suggestions com status
+    'suggested', para revisão humana via GET/POST /chapter-suggestions/*."""
+    payload = request.get_json(silent=True) or {}
+    batch_size = min(int(payload.get("batch_size", 5)), 20)
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            created = generate_chapter_suggestions_batch(cursor, batch_size)
+    return jsonify(serialize_rows(created)), 201
+
+
+@app.get("/chapter-suggestions")
+@require_api_key
+def list_chapter_suggestions():
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                SELECT id, title, summary, thematic_scope, status, generated_at
+                FROM editorial.chapter_suggestions
+                ORDER BY generated_at DESC
+            """)
+            rows = cursor.fetchall()
+    return jsonify(rows)
+
+
+@app.get("/chapter-suggestions/<suggestion_id>")
+@require_api_key
+def get_chapter_suggestion(suggestion_id):
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT * FROM editorial.chapter_suggestions WHERE id = %s", (suggestion_id,))
+            suggestion = cursor.fetchone()
+            if not suggestion:
+                return jsonify({"error": "Chapter suggestion not found"}), 404
+
+            sources = []
+            for item in suggestion["proposed_sources"]:
+                if item.get("segment_id"):
+                    cursor.execute("""
+                        SELECT id, title AS segment_title, full_text AS segment_full_text,
+                               segment_type, is_channeled
+                        FROM editorial.content_segments WHERE id = %s
+                    """, (item["segment_id"],))
+                    sources.append({**item, **(cursor.fetchone() or {})})
+                elif item.get("knowledge_card_id"):
+                    cursor.execute("""
+                        SELECT id, title AS card_title, summary AS card_summary
+                        FROM editorial.knowledge_cards WHERE id = %s
+                    """, (item["knowledge_card_id"],))
+                    sources.append({**item, **(cursor.fetchone() or {})})
+            suggestion["sources"] = sources
+    return jsonify(suggestion)
+
+
+@app.post("/chapter-suggestions/<suggestion_id>/promote")
+@require_api_key
+def promote_chapter_suggestion(suggestion_id):
+    """Transação única (ADR-019 §3): cria o capítulo real, insere as sources do
+    snapshot e marca a sugestão como promovida — tudo dentro da mesma conexão, nunca
+    como chamadas HTTP encadeadas que poderiam ficar pela metade em caso de falha."""
+    payload = request.get_json(silent=True) or {}
+    book_project_id = payload.get("book_project_id")
+    if not book_project_id:
+        return jsonify({"error": "Missing required field", "fields": ["book_project_id"]}), 400
+
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT * FROM editorial.chapter_suggestions WHERE id = %s", (suggestion_id,))
+            suggestion = cursor.fetchone()
+            if not suggestion:
+                return jsonify({"error": "Chapter suggestion not found"}), 404
+            if suggestion["status"] != "suggested":
+                return jsonify({"error": "Suggestion is not in suggested status", "status": suggestion["status"]}), 400
+
+            cursor.execute("SELECT id FROM editorial.book_projects WHERE id = %s", (book_project_id,))
+            if not cursor.fetchone():
+                return jsonify({"error": "Book project not found"}), 404
+
+            chapter_order = payload.get("chapter_order")
+            if chapter_order is None:
+                cursor.execute(
+                    "SELECT COALESCE(MAX(chapter_order), 0) + 1 AS next_order FROM editorial.chapters WHERE book_project_id = %s",
+                    (book_project_id,),
+                )
+                chapter_order = cursor.fetchone()["next_order"]
+
+            title = payload.get("title") or suggestion["title"]
+            concept_ids = suggestion["thematic_scope"] or []
+
+            chapter = insert_chapter(cursor, book_project_id, chapter_order, title, concept_ids)
+            insert_chapter_sources(cursor, chapter["id"], suggestion["proposed_sources"])
+
+            cursor.execute("""
+                UPDATE editorial.chapter_suggestions
+                SET status = 'promoted', promoted_chapter_id = %s
+                WHERE id = %s
+            """, (chapter["id"], suggestion_id))
+
+            result = build_chapter_detail(cursor, chapter["id"])
+    return jsonify(result), 201
+
+
+@app.post("/chapter-suggestions/<suggestion_id>/dismiss")
+@require_api_key
+def dismiss_chapter_suggestion(suggestion_id):
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                UPDATE editorial.chapter_suggestions SET status = 'dismissed'
+                WHERE id = %s AND status = 'suggested'
+                RETURNING *
+            """, (suggestion_id,))
+            row = cursor.fetchone()
+    if not row:
+        return jsonify({"error": "Chapter suggestion not found or not in suggested status"}), 404
+    return jsonify(row)
 
 
 @app.put("/chapters/<chapter_id>/sources")
@@ -1197,15 +1483,7 @@ def set_chapter_sources(chapter_id):
                 _fetch_chapter_sources(cursor, chapter_id),
             )
 
-            for order, item in enumerate(sources, start=1):
-                cursor.execute("""
-                    INSERT INTO editorial.chapter_sources
-                        (chapter_id, segment_id, knowledge_card_id, source_order, inclusion_type, content)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                """, (
-                    chapter_id, item.get("segment_id"), item.get("knowledge_card_id"),
-                    order, item["inclusion_type"], item.get("content"),
-                ))
+            insert_chapter_sources(cursor, chapter_id, sources)
 
             cursor.execute("UPDATE editorial.chapters SET updated_at = NOW() WHERE id = %s", (chapter_id,))
             result = build_chapter_detail(cursor, chapter_id)

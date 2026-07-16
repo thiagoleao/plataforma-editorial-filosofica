@@ -28,7 +28,7 @@ export default function SourceResultCard({
   isChanneled?: boolean | null;
   similarity?: number;
   actionLabel: string;
-  onAction: () => void;
+  onAction?: () => void;
   disabled?: boolean;
   extra?: React.ReactNode;
 }) {
