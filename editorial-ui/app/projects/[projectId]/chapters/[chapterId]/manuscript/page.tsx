@@ -27,7 +27,7 @@ export default async function ChapterManuscriptPage({
       <div>
         <Link
           href={`/projects/${projectId}/chapters/${chapterId}`}
-          className="text-sm text-gray-500 hover:underline"
+          className="glass-link text-sm text-gray-500 dark:text-gray-400"
         >
           ← #{chapter.chapter_order} {chapter.title}
         </Link>

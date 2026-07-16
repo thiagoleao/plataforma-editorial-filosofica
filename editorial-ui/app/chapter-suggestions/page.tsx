@@ -23,7 +23,7 @@ export default async function ChapterSuggestionsPage() {
           <Link
             key={suggestion.id}
             href={`/chapter-suggestions/${suggestion.id}`}
-            className="flex flex-col gap-2 rounded-lg border border-gray-200 p-4 hover:bg-gray-100 dark:border-gray-800 dark:hover:bg-gray-900"
+            className="glass-card glass-card-hover flex flex-col gap-2 p-4"
           >
             <div className="flex items-start justify-between gap-2">
               <p className="font-medium">{suggestion.title}</p>
@@ -36,7 +36,7 @@ export default async function ChapterSuggestionsPage() {
           </Link>
         ))}
         {visible.length === 0 && (
-          <p className="col-span-full rounded-lg border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500 dark:border-gray-700">
+          <p className="glass-card col-span-full p-8 text-center text-sm text-gray-500 dark:text-gray-400">
             Nenhuma sugestão ainda. Elas aparecem aqui conforme o acervo é varrido periodicamente.
           </p>
         )}

@@ -7,7 +7,7 @@ function LiteralSegmentView({ node }: NodeViewProps) {
   const text = node.attrs.text as string;
   return (
     <NodeViewWrapper
-      className="my-2 rounded-md border border-indigo-200 bg-indigo-50 p-3 dark:border-indigo-900 dark:bg-indigo-950"
+      className="my-2 rounded-2xl border border-indigo-300/60 bg-indigo-50/70 p-3 backdrop-blur-md dark:border-indigo-800/50 dark:bg-indigo-950/40"
       contentEditable={false}
     >
       <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-indigo-700 dark:text-indigo-300">

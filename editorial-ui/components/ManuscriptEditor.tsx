@@ -59,7 +59,7 @@ export default function ManuscriptEditor({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-gray-500 dark:text-gray-400">
           {initialUpdatedAt
             ? `Última gravação: ${new Date(initialUpdatedAt).toLocaleString("pt-BR")}`
             : "Manuscrito ainda não salvo — composto a partir das fontes do capítulo."}
@@ -70,7 +70,7 @@ export default function ManuscriptEditor({
             onClick={handleCheckpoint}
             disabled={isPending || !initialUpdatedAt}
             title={!initialUpdatedAt ? "Salve o manuscrito ao menos uma vez antes de criar uma versão" : ""}
-            className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:hover:bg-gray-800"
+            className="glass-pill glass-pill-secondary glass-pill-sm"
           >
             Salvar versão
           </button>
@@ -78,20 +78,16 @@ export default function ManuscriptEditor({
             type="button"
             onClick={handleSave}
             disabled={isPending}
-            className="rounded-md bg-black px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40 dark:bg-white dark:text-black"
+            className="glass-pill glass-pill-primary glass-pill-sm"
           >
             Salvar
           </button>
         </div>
       </div>
 
-      {message && (
-        <p className="rounded-md border border-gray-200 bg-gray-100 px-3 py-2 text-sm dark:border-gray-800 dark:bg-gray-900">
-          {message}
-        </p>
-      )}
+      {message && <p className="glass-alert-info">{message}</p>}
 
-      <div className="rounded-md border border-gray-300 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
+      <div className="glass-card p-4">
         <EditorContent editor={editor} />
       </div>
     </div>

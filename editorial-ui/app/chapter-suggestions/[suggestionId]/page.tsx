@@ -33,7 +33,7 @@ export default async function ChapterSuggestionPage({
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <Link href="/chapter-suggestions" className="text-sm text-gray-500 hover:underline">
+        <Link href="/chapter-suggestions" className="glass-link text-sm text-gray-500 dark:text-gray-400">
           ← Sugestões
         </Link>
         <div className="mt-1 flex items-center gap-3">
@@ -44,7 +44,7 @@ export default async function ChapterSuggestionPage({
       </div>
 
       {suggestion.status === "promoted" && suggestion.promoted_chapter_id && (
-        <p className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-900 dark:border-green-900 dark:bg-green-950 dark:text-green-200">
+        <p className="rounded-2xl border border-green-300/60 bg-green-50/70 px-3 py-2 text-sm text-green-900 backdrop-blur-md dark:border-green-800/50 dark:bg-green-950/40 dark:text-green-200">
           Já promovida para um capítulo real.
         </p>
       )}
@@ -68,18 +68,13 @@ export default async function ChapterSuggestionPage({
       </div>
 
       {suggestion.status === "suggested" && (
-        <div className="flex flex-col gap-4 rounded-lg border border-gray-200 p-5 dark:border-gray-800 sm:flex-row sm:items-end sm:justify-between">
+        <div className="glass-card flex flex-col gap-4 p-5 sm:flex-row sm:items-end sm:justify-between">
           <form action={promoteWithSuggestion} className="flex flex-1 flex-wrap items-end gap-3">
             <div className="flex flex-1 min-w-48 flex-col gap-1">
               <label htmlFor="book_project_id" className="text-sm font-medium">
                 Promover para o projeto<span className="text-red-500"> *</span>
               </label>
-              <select
-                id="book_project_id"
-                name="book_project_id"
-                required
-                className="rounded-md border border-gray-300 p-2 text-sm dark:border-gray-700 dark:bg-gray-900"
-              >
+              <select id="book_project_id" name="book_project_id" required className="glass-input">
                 <option value="">Selecione…</option>
                 {projects.map((project) => (
                   <option key={project.id} value={project.id}>
@@ -98,21 +93,15 @@ export default async function ChapterSuggestionPage({
                 type="number"
                 min={1}
                 placeholder="auto"
-                className="rounded-md border border-gray-300 p-2 text-sm dark:border-gray-700 dark:bg-gray-900"
+                className="glass-input"
               />
             </div>
-            <button
-              type="submit"
-              className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black"
-            >
+            <button type="submit" className="glass-pill glass-pill-primary">
               Promover
             </button>
           </form>
           <form action={dismissWithSuggestion}>
-            <button
-              type="submit"
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
-            >
+            <button type="submit" className="glass-pill glass-pill-secondary">
               Descartar
             </button>
           </form>
@@ -120,8 +109,8 @@ export default async function ChapterSuggestionPage({
       )}
 
       {projects.length === 0 && suggestion.status === "suggested" && (
-        <p className="text-sm text-gray-500">
-          Você ainda não tem nenhum projeto de livro — <Link href="/" className="hover:underline">crie um primeiro</Link>{" "}
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Você ainda não tem nenhum projeto de livro — <Link href="/" className="glass-link">crie um primeiro</Link>{" "}
           para poder promover esta sugestão.
         </p>
       )}

@@ -279,7 +279,7 @@ export default function ChapterBuilder({
         <div className="flex items-center gap-3">
           <StatusBadge status={chapter.status} />
           {chapter.reviewed_by && (
-            <span className="text-xs text-gray-500">
+            <span className="text-xs text-gray-500 dark:text-gray-400">
               revisado por {chapter.reviewed_by} em{" "}
               {chapter.reviewed_at ? new Date(chapter.reviewed_at).toLocaleDateString("pt-BR") : ""}
             </span>
@@ -290,7 +290,7 @@ export default function ChapterBuilder({
             type="button"
             onClick={handleChecklist}
             disabled={isPending}
-            className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:hover:bg-gray-800"
+            className="glass-pill glass-pill-secondary glass-pill-sm"
           >
             Rodar checklist de consolidação
           </button>
@@ -299,7 +299,7 @@ export default function ChapterBuilder({
               type="button"
               onClick={handleApprove}
               disabled={isPending || sources.length === 0}
-              className="rounded-md bg-black px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40 dark:bg-white dark:text-black"
+              className="glass-pill glass-pill-primary glass-pill-sm"
             >
               Aprovar capítulo
             </button>
@@ -311,13 +311,13 @@ export default function ChapterBuilder({
                 placeholder="Seu nome"
                 value={reviewedBy}
                 onChange={(e) => setReviewedBy(e.target.value)}
-                className="rounded-md border border-gray-300 px-2 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-900"
+                className="glass-input px-2 py-1.5 text-xs"
               />
               <button
                 type="button"
                 onClick={handleReview}
                 disabled={isPending}
-                className="rounded-md bg-black px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40 dark:bg-white dark:text-black"
+                className="glass-pill glass-pill-primary glass-pill-sm"
               >
                 Marcar como revisado
               </button>
@@ -326,21 +326,20 @@ export default function ChapterBuilder({
         </div>
       </div>
 
-      {message && (
-        <p className="rounded-md border border-gray-200 bg-gray-100 px-3 py-2 text-sm dark:border-gray-800 dark:bg-gray-900">
-          {message}
-        </p>
-      )}
+      {message && <p className="glass-alert-info">{message}</p>}
 
       {checklist && (
-        <div className="rounded-md border border-gray-200 p-3 text-sm dark:border-gray-800">
+        <div className="glass-card p-3 text-sm">
           {checklist.ok ? (
             checklist.data.issues.length === 0 ? (
               <p>Nenhum problema encontrado no checklist.</p>
             ) : (
               <ul className="flex flex-col gap-2">
                 {checklist.data.issues.map((issue, i) => (
-                  <li key={i} className="rounded bg-amber-50 p-2 text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                  <li
+                    key={i}
+                    className="rounded-xl bg-amber-50/70 p-2 text-amber-900 backdrop-blur-md dark:bg-amber-950/40 dark:text-amber-200"
+                  >
                     <span className="font-medium">{issue.type}</span>
                     {issue.detail && <span> — {issue.detail}</span>}
                     {issue.alias_found && (
@@ -358,7 +357,7 @@ export default function ChapterBuilder({
               </ul>
             )
           ) : (
-            <p className="text-red-600">Erro: {checklist.error}</p>
+            <p className="text-red-600 dark:text-red-400">Erro: {checklist.error}</p>
           )}
         </div>
       )}
@@ -374,19 +373,19 @@ export default function ChapterBuilder({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && runSearch()}
-              className="flex-1 rounded-md border border-gray-300 p-2 text-sm dark:border-gray-700 dark:bg-gray-900"
+              className="glass-input flex-1"
             />
             <button
               type="button"
               onClick={runSearch}
               disabled={searching}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:hover:bg-gray-800"
+              className="glass-pill glass-pill-secondary"
             >
               Buscar
             </button>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs text-gray-500">ou navegue por conceito:</span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">ou navegue por conceito:</span>
             {(chapter.thematic_scope.length > 0
               ? concepts.filter((c) => chapter.thematic_scope.includes(c.id))
               : concepts.slice(0, 12)
@@ -395,10 +394,10 @@ export default function ChapterBuilder({
                 key={c.id}
                 type="button"
                 onClick={() => browseByConcept(c.canonical_name)}
-                className={`rounded-full border px-2 py-0.5 text-[11px] ${
+                className={`rounded-full px-2 py-0.5 text-[11px] backdrop-blur-md transition-all duration-150 ${
                   conceptFilter === c.canonical_name
-                    ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
-                    : "border-gray-300 text-gray-600 dark:border-gray-700 dark:text-gray-400"
+                    ? "bg-indigo-900/90 text-white dark:bg-white/90 dark:text-indigo-950"
+                    : "border border-white/60 bg-white/40 text-gray-600 hover:bg-white/60 dark:border-white/10 dark:bg-white/5 dark:text-gray-400 dark:hover:bg-white/10"
                 }`}
               >
                 {c.canonical_name}
@@ -406,7 +405,7 @@ export default function ChapterBuilder({
             ))}
           </div>
 
-          {searchError && <p className="text-sm text-red-600">{searchError}</p>}
+          {searchError && <p className="text-sm text-red-600 dark:text-red-400">{searchError}</p>}
 
           <div className="flex max-h-[32rem] flex-col gap-2 overflow-y-auto">
             {results.map((result) => (
@@ -425,7 +424,7 @@ export default function ChapterBuilder({
               />
             ))}
             {results.length === 0 && !searching && (
-              <p className="p-4 text-center text-sm text-gray-500">
+              <p className="p-4 text-center text-sm text-gray-500 dark:text-gray-400">
                 Busque algo ou clique num conceito para começar a explorar.
               </p>
             )}
@@ -441,7 +440,7 @@ export default function ChapterBuilder({
                 type="button"
                 onClick={addTransitionBlock}
                 disabled={isPending}
-                className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:hover:bg-gray-800"
+                className="glass-pill glass-pill-secondary glass-pill-sm"
               >
                 + Bloco de transição
               </button>
@@ -449,8 +448,8 @@ export default function ChapterBuilder({
                 type="button"
                 onClick={handlePropose}
                 disabled={isPending}
-                className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:hover:bg-gray-800"
                 title="Atalho opcional: sugere uma montagem inicial para você editar. Nunca é obrigatório."
+                className="glass-pill glass-pill-secondary glass-pill-sm"
               >
                 Sugerir automaticamente
               </button>
@@ -458,7 +457,7 @@ export default function ChapterBuilder({
                 type="button"
                 onClick={handleSave}
                 disabled={isPending}
-                className="rounded-md bg-black px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40 dark:bg-white dark:text-black"
+                className="glass-pill glass-pill-primary glass-pill-sm"
               >
                 Salvar
               </button>
@@ -468,7 +467,7 @@ export default function ChapterBuilder({
           <div className="flex flex-col gap-2">
             {sources.map((source, index) => {
               const moveControls = (
-                <div className="flex gap-2 text-xs text-gray-500">
+                <div className="flex gap-2 text-xs text-gray-500 dark:text-gray-400">
                   <button
                     type="button"
                     onClick={() => moveSource(source.key, -1)}
@@ -490,18 +489,15 @@ export default function ChapterBuilder({
 
               if (source.inclusion_type === "transition_context") {
                 return (
-                  <div
-                    key={source.key}
-                    className="rounded-md border border-gray-200 p-3 text-sm dark:border-gray-800"
-                  >
+                  <div key={source.key} className="glass-item text-sm">
                     <div className="mb-2 flex items-center justify-between">
-                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800 backdrop-blur-md dark:bg-amber-900 dark:text-amber-200">
                         Transição — texto próprio
                       </span>
                       <button
                         type="button"
                         onClick={() => removeSource(source.key)}
-                        className="shrink-0 rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+                        className="glass-pill glass-pill-secondary glass-pill-sm shrink-0"
                       >
                         Remover
                       </button>
@@ -532,7 +528,7 @@ export default function ChapterBuilder({
               );
             })}
             {sources.length === 0 && (
-              <p className="rounded-md border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700">
+              <p className="glass-card p-6 text-center text-sm text-gray-500 dark:text-gray-400">
                 Nenhuma fonte ainda. Adicione a partir do painel de exploração à esquerda.
               </p>
             )}

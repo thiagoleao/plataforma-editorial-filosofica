@@ -19,7 +19,7 @@ export default async function DuplicateReportPage({
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <Link href={`/projects/${projectId}`} className="text-sm text-gray-500 hover:underline">
+        <Link href={`/projects/${projectId}`} className="glass-link text-sm text-gray-500 dark:text-gray-400">
           ← {project.title}
         </Link>
         <h1 className="mt-1 text-2xl font-semibold">Relatório de duplicidade</h1>
@@ -30,16 +30,13 @@ export default async function DuplicateReportPage({
       </div>
 
       {report.conflicts.length === 0 ? (
-        <p className="rounded-lg border border-gray-200 p-6 text-sm text-gray-500 dark:border-gray-800">
+        <p className="glass-card p-6 text-sm text-gray-500 dark:text-gray-400">
           Nenhuma sobreposição encontrada entre os capítulos deste projeto.
         </p>
       ) : (
         <ul className="flex flex-col gap-3">
           {report.conflicts.map((conflict, i) => (
-            <li
-              key={i}
-              className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm dark:border-amber-800 dark:bg-amber-950"
-            >
+            <li key={i} className="glass-alert-warning text-sm">
               <p className="font-medium">
                 Similaridade {(conflict.similarity * 100).toFixed(1)}%
               </p>

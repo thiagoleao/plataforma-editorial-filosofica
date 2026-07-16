@@ -29,7 +29,7 @@ export default function TransitionEditor({
   });
 
   return (
-    <div className="rounded-md border border-gray-300 bg-white p-2 dark:border-gray-700 dark:bg-gray-900">
+    <div className="glass-input">
       <EditorContent editor={editor} />
     </div>
   );

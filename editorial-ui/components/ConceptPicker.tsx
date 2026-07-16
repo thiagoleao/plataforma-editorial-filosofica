@@ -36,22 +36,22 @@ export default function ConceptPicker({ concepts }: { concepts: Concept[] }) {
         placeholder="Filtrar conceitos..."
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
-        className="rounded-md border border-gray-300 p-2 text-sm dark:border-gray-700 dark:bg-gray-900"
+        className="glass-input"
       />
       {selected.size > 0 && (
-        <p className="text-xs text-gray-500">{selected.size} selecionado(s)</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400">{selected.size} selecionado(s)</p>
       )}
-      <div className="max-h-48 overflow-y-auto rounded-md border border-gray-200 p-2 dark:border-gray-800">
+      <div className="glass-item max-h-48 overflow-y-auto">
         <div className="flex flex-wrap gap-1.5">
           {filtered.map((concept) => {
             const active = selected.has(concept.canonical_name);
             return (
               <label
                 key={concept.id}
-                className={`cursor-pointer select-none rounded-full border px-2.5 py-1 text-xs ${
+                className={`cursor-pointer rounded-full px-2.5 py-1 text-xs backdrop-blur-md transition-all duration-150 select-none ${
                   active
-                    ? "border-black bg-black text-white dark:border-white dark:bg-white dark:text-black"
-                    : "border-gray-300 text-gray-700 dark:border-gray-700 dark:text-gray-300"
+                    ? "bg-indigo-900/90 text-white dark:bg-white/90 dark:text-indigo-950"
+                    : "border border-white/60 bg-white/40 text-gray-700 hover:bg-white/60 dark:border-white/10 dark:bg-white/5 dark:text-gray-300 dark:hover:bg-white/10"
                 }`}
               >
                 <input

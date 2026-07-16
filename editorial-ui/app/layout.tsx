@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import Link from "next/link";
+import Sidebar from "@/components/Sidebar";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Curadoria Editorial",
+  title: "Plataforma Editorial Filosófica",
   description: "Consulta e curadoria manual do acervo para montagem de capítulos.",
 };
 
@@ -28,26 +28,9 @@ export default function RootLayout({
       lang="pt-BR"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100">
-        <header className="border-b border-gray-200 dark:border-gray-800">
-          <div className="mx-auto flex max-w-6xl items-center gap-4 px-6 py-3">
-            <Link href="/" className="font-semibold">
-              Curadoria Editorial
-            </Link>
-            <span className="text-sm text-gray-500 dark:text-gray-400">
-              Plataforma Editorial Filosófica
-            </span>
-            <nav className="ml-auto flex items-center gap-4 text-sm">
-              <Link href="/" className="hover:underline">
-                Projetos
-              </Link>
-              <Link href="/chapter-suggestions" className="hover:underline">
-                Sugestões
-              </Link>
-            </nav>
-          </div>
-        </header>
-        <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">{children}</main>
+      <body className="min-h-full flex text-gray-900 dark:text-gray-100">
+        <Sidebar />
+        <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-10">{children}</main>
       </body>
     </html>
   );

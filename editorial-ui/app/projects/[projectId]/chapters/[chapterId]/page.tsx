@@ -26,7 +26,7 @@ export default async function ChapterPage({
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <Link href={`/projects/${projectId}`} className="text-sm text-gray-500 hover:underline">
+        <Link href={`/projects/${projectId}`} className="glass-link text-sm text-gray-500 dark:text-gray-400">
           ← {chapter.book_project_title}
         </Link>
         <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
@@ -35,7 +35,7 @@ export default async function ChapterPage({
           </h1>
           <Link
             href={`/projects/${projectId}/chapters/${chapterId}/manuscript`}
-            className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+            className="glass-pill glass-pill-secondary glass-pill-sm"
           >
             Ver manuscrito
           </Link>

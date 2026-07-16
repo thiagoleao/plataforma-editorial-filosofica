@@ -69,21 +69,21 @@ export default function SegmentInsightPanel({ segmentId }: { segmentId: string }
   const visibleInsights = (insights ?? []).filter((i) => i.status !== "dismissed");
 
   return (
-    <div className="mt-2 border-t border-gray-100 pt-2 dark:border-gray-800">
-      <button type="button" onClick={toggle} className="text-xs text-gray-500 hover:underline">
+    <div className="mt-2 border-t border-white/40 pt-2 dark:border-white/10">
+      <button type="button" onClick={toggle} className="glass-link text-xs text-gray-500 dark:text-gray-400">
         {open ? "Ocultar cartões de insight" : "Cartões de insight"}
         {insights && visibleInsights.length > 0 ? ` (${visibleInsights.length})` : ""}
       </button>
 
       {open && (
         <div className="mt-2 flex flex-col gap-2">
-          {loading && <p className="text-xs text-gray-500">Carregando…</p>}
-          {error && <p className="text-xs text-red-600">{error}</p>}
+          {loading && <p className="text-xs text-gray-500 dark:text-gray-400">Carregando…</p>}
+          {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
 
           {visibleInsights.map((insight) => (
             <div
               key={insight.id}
-              className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs dark:border-amber-900 dark:bg-amber-950"
+              className="rounded-2xl border border-amber-300/60 bg-amber-50/70 p-2 text-xs backdrop-blur-md dark:border-amber-800/50 dark:bg-amber-950/40"
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="font-medium text-amber-900 dark:text-amber-200">
@@ -126,14 +126,14 @@ export default function SegmentInsightPanel({ segmentId }: { segmentId: string }
           ))}
 
           {!loading && visibleInsights.length === 0 && (
-            <p className="text-xs text-gray-500">Nenhum cartão de insight ainda.</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Nenhum cartão de insight ainda.</p>
           )}
 
           <button
             type="button"
             onClick={handleGenerate}
             disabled={isPending}
-            className="self-start rounded-md border border-gray-300 px-2 py-1 text-[11px] font-medium hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:hover:bg-gray-800"
+            className="glass-pill glass-pill-secondary self-start px-2 py-1 text-[11px]"
           >
             {isPending ? "Gerando…" : "Gerar cartão de insight"}
           </button>
