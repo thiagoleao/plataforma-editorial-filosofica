@@ -1,9 +1,10 @@
 import Image from "next/image";
 import Link from "next/link";
-import { BookOpen, Sparkles } from "lucide-react";
+import { BookOpen, Compass, Sparkles } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/", label: "Projetos", icon: BookOpen },
+  { href: "/acervo", label: "Explorar Acervo", icon: Compass },
   { href: "/chapter-suggestions", label: "Sugestões", icon: Sparkles },
 ];
 

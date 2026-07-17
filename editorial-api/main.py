@@ -26,6 +26,12 @@ EMBEDDING_MAX_CHARS = 20000
 CHAT_MODEL = "gpt-4.1-mini"
 RELATION_TYPES = {"cooccurrence", "causal", "evolutionary", "pre_requisito", "contraste", "manifestacao_de"}
 
+# recalculate_concept_graph() varre editorial.concepts/concept_relations/knowledge_cards quase
+# por inteiro a cada chamada — chamadas concorrentes (ex.: upserts em paralelo) tomam locks de
+# linha em ordens diferentes e o Postgres derruba uma delas com DeadlockDetected. Serializar via
+# advisory lock transacional (libera sozinho no commit/rollback) em vez de mudar a lógica da função.
+CONCEPT_GRAPH_LOCK_KEY = 741125
+
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 
@@ -650,6 +656,12 @@ def upsert_segment():
 
     with get_connection() as connection:
         with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            # Precisa ser adquirido antes de qualquer INSERT/UPDATE desta transação, não só antes
+            # de recalculate_concept_graph() — senão duas transações concorrentes podem tomar locks
+            # de linha conflitantes (via sync_concepts/upsert) antes de disputar o advisory lock,
+            # e o Postgres detecta um ciclo entre lock de linha e advisory lock (deadlock de novo).
+            cursor.execute("SELECT pg_advisory_xact_lock(%s)", (CONCEPT_GRAPH_LOCK_KEY,))
+
             cursor.execute("SELECT id FROM editorial.sources WHERE external_file_id = %s", (payload["external_file_id"],))
             source = cursor.fetchone()
             if not source:
@@ -814,6 +826,37 @@ def get_segment(segment_id):
     return jsonify(strip_embedding(row))
 
 
+@app.get("/segment-insights")
+@require_api_key
+def list_all_segment_insights():
+    """Lista cartões de insight de todo o acervo, não escopados a um segmento (ADR-023,
+    tela Explorar Acervo) -- só os que já foram gerados, nunca dispara geração nova."""
+    status_filter = request.args.get("status")
+    limit = min(request.args.get("limit", default=50, type=int), 500)
+    clauses = []
+    parameters = []
+    if status_filter:
+        clauses.append("si.status = %s")
+        parameters.append(status_filter)
+    else:
+        clauses.append("si.status != 'dismissed'")
+    where = "WHERE " + " AND ".join(clauses)
+    parameters.append(limit)
+
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(f"""
+                SELECT si.*, seg.title AS segment_title, seg.is_channeled
+                FROM editorial.segment_insights si
+                JOIN editorial.content_segments seg ON seg.id = si.segment_id
+                {where}
+                ORDER BY si.generated_at DESC
+                LIMIT %s
+            """, parameters)
+            rows = cursor.fetchall()
+    return jsonify(rows)
+
+
 @app.get("/segments/<segment_id>/insights")
 @require_api_key
 def list_segment_insights(segment_id):
@@ -831,6 +874,69 @@ def list_segment_insights(segment_id):
     return jsonify(rows)
 
 
+def generate_and_persist_segment_insights(cursor, segment_id, segment_full_text):
+    """Núcleo compartilhado da geração de cartão de insight (ADR-022 §2) — usado tanto
+    pela geração sob demanda (um segmento) quanto pelo lote controlado (ADR-023 §3)."""
+    # Mesma disputa de locks que upsert_segment/upsert_knowledge_card (ver comentário lá):
+    # esta função também escreve em editorial.concepts/concept_relations, que
+    # recalculate_concept_graph() varre por inteiro.
+    cursor.execute("SELECT pg_advisory_xact_lock(%s)", (CONCEPT_GRAPH_LOCK_KEY,))
+
+    cursor.execute("""
+        SELECT c.id, c.canonical_name
+        FROM editorial.concepts c
+        JOIN editorial.segment_concepts sc ON sc.concept_id = c.id
+        WHERE sc.segment_id = %s
+    """, (segment_id,))
+    existing_names = [row["canonical_name"] for row in cursor.fetchall()]
+
+    insights, relations = generate_segment_insights(segment_full_text, existing_names)
+    if not insights:
+        return []
+
+    all_related_names = set()
+    for insight in insights:
+        all_related_names.update(insight.get("related_concepts") or [])
+    sync_concepts(cursor, sorted(all_related_names), segment_id=segment_id)
+
+    cursor.execute("""
+        SELECT c.id, c.canonical_name
+        FROM editorial.concepts c
+        JOIN editorial.segment_concepts sc ON sc.concept_id = c.id
+        WHERE sc.segment_id = %s
+    """, (segment_id,))
+    name_to_id = {row["canonical_name"]: row["id"] for row in cursor.fetchall()}
+
+    created = []
+    for insight in insights:
+        cursor.execute("""
+            INSERT INTO editorial.segment_insights (
+                segment_id, concept_title, explanation, philosophical_context,
+                practical_application, related_concepts, model
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING *
+        """, (
+            segment_id,
+            (insight.get("concept_title") or "")[:500],
+            insight.get("explanation") or "",
+            insight.get("philosophical_context") or "",
+            insight.get("practical_application") or "",
+            Json(insight.get("related_concepts") or []),
+            CHAT_MODEL,
+        ))
+        created.append(cursor.fetchone())
+
+    if name_to_id:
+        cursor.execute("""
+            UPDATE editorial.concepts
+            SET scope = 'universal'
+            WHERE id = ANY(%s::uuid[]) AND scope = 'tematico'
+        """, (list(name_to_id.values()),))
+
+    apply_relation_types(cursor, name_to_id, relations)
+    return created
+
+
 @app.post("/segments/<segment_id>/insights")
 @require_api_key
 def generate_segment_insight_cards(segment_id):
@@ -843,61 +949,51 @@ def generate_segment_insight_cards(segment_id):
             if not segment:
                 return jsonify({"error": "Segment not found"}), 404
 
-            cursor.execute("""
-                SELECT c.id, c.canonical_name
-                FROM editorial.concepts c
-                JOIN editorial.segment_concepts sc ON sc.concept_id = c.id
-                WHERE sc.segment_id = %s
-            """, (segment_id,))
-            existing_concepts = cursor.fetchall()
-            existing_names = [c["canonical_name"] for c in existing_concepts]
-
-            insights, relations = generate_segment_insights(segment["full_text"], existing_names)
-            if not insights:
+            created = generate_and_persist_segment_insights(cursor, segment_id, segment["full_text"])
+            if not created:
                 return jsonify({"error": "Failed to generate insights"}), 502
 
-            all_related_names = set()
-            for insight in insights:
-                all_related_names.update(insight.get("related_concepts") or [])
-            sync_concepts(cursor, sorted(all_related_names), segment_id=segment_id)
-
-            cursor.execute("""
-                SELECT c.id, c.canonical_name
-                FROM editorial.concepts c
-                JOIN editorial.segment_concepts sc ON sc.concept_id = c.id
-                WHERE sc.segment_id = %s
-            """, (segment_id,))
-            name_to_id = {row["canonical_name"]: row["id"] for row in cursor.fetchall()}
-
-            created = []
-            for insight in insights:
-                cursor.execute("""
-                    INSERT INTO editorial.segment_insights (
-                        segment_id, concept_title, explanation, philosophical_context,
-                        practical_application, related_concepts, model
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    RETURNING *
-                """, (
-                    segment_id,
-                    (insight.get("concept_title") or "")[:500],
-                    insight.get("explanation") or "",
-                    insight.get("philosophical_context") or "",
-                    insight.get("practical_application") or "",
-                    Json(insight.get("related_concepts") or []),
-                    CHAT_MODEL,
-                ))
-                created.append(cursor.fetchone())
-
-            if name_to_id:
-                cursor.execute("""
-                    UPDATE editorial.concepts
-                    SET scope = 'universal'
-                    WHERE id = ANY(%s::uuid[]) AND scope = 'tematico'
-                """, (list(name_to_id.values()),))
-
-            apply_relation_types(cursor, name_to_id, relations)
-
     return jsonify(serialize_rows(created)), 201
+
+
+@app.post("/segment-insights/generate-batch")
+@require_api_key
+def generate_segment_insights_batch():
+    """Lote explícito e controlado (ADR-023 §3) — nunca automático/agendado. Processa os
+    N segmentos canalizados de maior editorial_relevance que ainda não têm nenhum
+    segment_insight. Mantém a cautela de custo da ADR-022 §2: só roda quando alguém pede."""
+    payload = request.get_json(silent=True) or {}
+    batch_size = min(int(payload.get("batch_size", 5)), 20)
+
+    results = {"processed": [], "errors": []}
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                SELECT cs.id, cs.title, cs.full_text
+                FROM editorial.content_segments cs
+                WHERE cs.is_channeled = TRUE
+                  AND NOT EXISTS (
+                      SELECT 1 FROM editorial.segment_insights si WHERE si.segment_id = cs.id
+                  )
+                ORDER BY cs.editorial_relevance DESC
+                LIMIT %s
+            """, (batch_size,))
+            candidates = cursor.fetchall()
+
+            for segment in candidates:
+                try:
+                    created = generate_and_persist_segment_insights(cursor, segment["id"], segment["full_text"])
+                    connection.commit()
+                    results["processed"].append({
+                        "segment_id": segment["id"],
+                        "segment_title": segment["title"],
+                        "insights_created": len(created),
+                    })
+                except Exception as error:
+                    connection.rollback()
+                    results["errors"].append({"segment_id": segment["id"], "reason": str(error)})
+
+    return jsonify(results)
 
 
 @app.post("/segment-insights/<insight_id>/review")
@@ -944,6 +1040,10 @@ def upsert_knowledge_card():
 
     with get_connection() as connection:
         with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            # Ver comentário equivalente em upsert_segment: precisa ser o primeiro comando da
+            # transação, antes de qualquer INSERT/UPDATE.
+            cursor.execute("SELECT pg_advisory_xact_lock(%s)", (CONCEPT_GRAPH_LOCK_KEY,))
+
             cursor.execute("SELECT id FROM editorial.sources WHERE external_file_id = %s", (payload["external_file_id"],))
             source = cursor.fetchone()
             if not source:

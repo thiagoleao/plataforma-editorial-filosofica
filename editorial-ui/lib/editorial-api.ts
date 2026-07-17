@@ -119,6 +119,25 @@ export type SegmentInsight = {
   model: string;
 };
 
+export type SegmentInsightListItem = SegmentInsight & {
+  segment_title: string;
+  is_channeled: boolean;
+};
+
+export type Theme = {
+  id: string;
+  theme_key: string;
+  name: string;
+  description: string | null;
+  minimum_relevance: number;
+  active: boolean;
+};
+
+export type BatchInsightResult = {
+  processed: { segment_id: string; segment_title: string; insights_created: number }[];
+  errors: { segment_id: string; reason: string }[];
+};
+
 export type ConceptRelation = {
   id: string;
   relation_type: string;
@@ -292,6 +311,21 @@ export function reviewSegmentInsight(id: string) {
 
 export function dismissSegmentInsight(id: string) {
   return request<SegmentInsight>(`/segment-insights/${id}/dismiss`, { method: "POST" });
+}
+
+export function listAllSegmentInsights(params: { status?: string; limit?: number } = {}) {
+  return request<SegmentInsightListItem[]>("/segment-insights", { searchParams: params });
+}
+
+export function generateSegmentInsightsBatch(batchSize = 5) {
+  return request<BatchInsightResult>("/segment-insights/generate-batch", {
+    method: "POST",
+    body: { batch_size: batchSize },
+  });
+}
+
+export function listThemes() {
+  return request<Theme[]>("/themes");
 }
 
 export function setConceptScope(id: string, scope: "universal" | "tematico") {

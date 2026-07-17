@@ -185,3 +185,8 @@ export async function dismissSegmentInsightAction(
     return { ok: false, error: errorMessage(error) };
   }
 }
+
+export async function generateSegmentInsightsBatchAction() {
+  await api.generateSegmentInsightsBatch(5);
+  revalidatePath("/acervo");
+}
