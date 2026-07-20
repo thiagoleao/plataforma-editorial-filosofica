@@ -38,11 +38,13 @@ export default function ManuscriptEditor({
     if (!editor) return;
     setMessage(null);
     startTransition(async () => {
-      const result = await saveChapterManuscriptAction(
-        chapterId,
-        bookProjectId,
-        editor.getJSON() as ManuscriptDoc
-      );
+      // ProseMirror monta os objetos `attrs` de cada nó com prototype nulo internamente —
+      // o serializador de argumentos de Server Action do Next.js não reconhece isso como
+      // objeto plano e substitui o valor por uma referência vazia ("$T"), silenciosamente
+      // perdendo segmentId/title/text de todo nó literalSegment. JSON.parse(JSON.stringify())
+      // força objetos planos genuínos antes de enviar.
+      const plainContent = JSON.parse(JSON.stringify(editor.getJSON())) as ManuscriptDoc;
+      const result = await saveChapterManuscriptAction(chapterId, bookProjectId, plainContent);
       setMessage(result.ok ? "Manuscrito salvo." : `Erro ao salvar: ${result.error}`);
       router.refresh();
     });
