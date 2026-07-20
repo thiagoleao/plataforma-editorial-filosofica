@@ -27,10 +27,10 @@ Isto **não é o mesmo schema órfão removido durante a ADR-011** (aquele — `
 
 **Isto muda o plano da ADR-012:** em vez de partir do zero para o Mapa Filosófico, já existem 34 conceitos curados e 108 relações de coocorrência calculadas dentro do n8n — um bom ponto de partida para migrar/reconciliar, não descartar. Mas a decisão de como reconciliar (qual conjunto é a fonte de verdade, o que migrar) é sua, não foi tomada aqui.
 
-## Workflows (todos "Published")
+## Workflows
 
 ### 01 - Google Drive Video Transcriber
-*Criado 2 julho, atualizado há 1 dia.*
+*Criado 2 julho, atualizado há 1 dia.* **Despublicado (Unpublish) em 2026-07-19** — os 185 vídeos da pasta do Drive já estavam todos com status `completed` na Data Table `Video Transcription Index` (confirmado cruzando a contagem do node "Listar vídeos da pasta" na última execução com o total de linhas da tabela, e checando que não havia nenhum status de erro). Sem vídeo novo para transcrever, não fazia sentido manter o agendamento de 30 em 30 minutos rodando. Reversível: basta "Publish" de novo quando novos vídeos forem adicionados à pasta.
 
 Tem uma nota própria no canvas documentando o fluxo:
 > Entrada: pasta Google Drive `1JIzo4ATE3Du0US0lmt3sj7Y6Vi6lfqKx`. Saída: arquivo `.txt` na mesma pasta. Depois que a transcrição for concluída, o vídeo original vai para a lixeira, não é apagado permanentemente. Credenciais necessárias: Google Drive OAuth2; AssemblyAI API em HTTP Header Auth. Importante: para usar `audio_url`, o arquivo precisa estar acessível por link.
