@@ -4,8 +4,8 @@ import {
   listKnowledgeCards,
   listThemes,
 } from "@/lib/editorial-api";
-import { generateSegmentInsightsBatchAction } from "@/lib/actions";
 import StatusBadge from "@/components/StatusBadge";
+import GenerateInsightsButton from "@/components/GenerateInsightsButton";
 
 export const dynamic = "force-dynamic";
 
@@ -137,11 +137,7 @@ export default async function AcervoPage({
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-2">
           <h2 className="font-medium">Cartões de insight gerados</h2>
-          <form action={generateSegmentInsightsBatchAction}>
-            <button type="submit" className="glass-pill glass-pill-secondary glass-pill-sm">
-              Gerar mais insights (lote de 5)
-            </button>
-          </form>
+          <GenerateInsightsButton />
         </div>
         {insights.length === 0 ? (
           <p className="glass-card p-4 text-sm text-gray-500 dark:text-gray-400">

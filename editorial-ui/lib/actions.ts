@@ -186,7 +186,14 @@ export async function dismissSegmentInsightAction(
   }
 }
 
-export async function generateSegmentInsightsBatchAction() {
-  await api.generateSegmentInsightsBatch(5);
-  revalidatePath("/acervo");
+export async function generateSegmentInsightsBatchAction(): Promise<
+  { ok: true; data: api.BatchInsightResult } | { ok: false; error: string }
+> {
+  try {
+    const data = await api.generateSegmentInsightsBatch(5);
+    revalidatePath("/acervo");
+    return { ok: true, data };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) };
+  }
 }
