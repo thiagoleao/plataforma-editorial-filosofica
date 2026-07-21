@@ -1,13 +1,18 @@
 import hmac
+import io
 import json
 import math
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from functools import wraps
+from urllib.parse import quote
 
 import psycopg2
-from flask import Flask, jsonify, request
+from docx import Document
+from docx.shared import Inches, Pt
+from flask import Flask, Response, jsonify, request
 from openai import OpenAI
 from pgvector.psycopg2 import register_vector
 from psycopg2.extras import Json, RealDictCursor
@@ -1741,6 +1746,114 @@ def checkpoint_chapter_manuscript(chapter_id):
             """, (chapter_id, Json(chapter["manuscript_content"]), label))
             row = cursor.fetchone()
     return jsonify(row), 201
+
+
+def build_chapter_docx(project_title, chapter_title, manuscript_content):
+    """ADR-015 §4. Percorre o manuscrito (Tiptap JSON) e monta o .docx — blocos literalSegment
+    viram parágrafos recuados/itálicos com o título da canalização como legenda; parágrafos
+    comuns preservam negrito/itálico. Nunca lê chapter_sources diretamente."""
+    document = Document()
+    document.add_heading(chapter_title, level=1)
+    subtitle = document.add_paragraph(project_title)
+    subtitle.runs[0].italic = True
+
+    for node in manuscript_content.get("content") or []:
+        node_type = node.get("type")
+        if node_type == "literalSegment":
+            attrs = node.get("attrs") or {}
+            caption = document.add_paragraph()
+            caption_run = caption.add_run(f"Canalização — {attrs.get('title')}" if attrs.get("title") else "Canalização")
+            caption_run.bold = True
+            caption_run.italic = True
+            caption_run.font.size = Pt(9)
+            body = document.add_paragraph()
+            body.paragraph_format.left_indent = Inches(0.3)
+            body_run = body.add_run(attrs.get("text") or "")
+            body_run.italic = True
+        elif node_type == "paragraph":
+            paragraph = document.add_paragraph()
+            for run_node in node.get("content") or []:
+                if run_node.get("type") != "text":
+                    continue
+                marks = {mark.get("type") for mark in (run_node.get("marks") or [])}
+                run = paragraph.add_run(run_node.get("text", ""))
+                run.bold = "bold" in marks
+                run.italic = "italic" in marks
+
+    buffer = io.BytesIO()
+    document.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
+def load_chapter_manuscript_for_export(cursor, chapter_id):
+    """Carrega o capítulo e seu manuscrito para exportação (ADR-015), com o mesmo gate humano
+    (reviewed/final) e o mesmo fallback de composição do GET /chapters/<id>/manuscript.
+    Retorna (chapter, manuscript_content) ou (None, erro_response)."""
+    cursor.execute("""
+        SELECT ch.*, bp.title AS book_project_title
+        FROM editorial.chapters ch
+        JOIN editorial.book_projects bp ON bp.id = ch.book_project_id
+        WHERE ch.id = %s
+    """, (chapter_id,))
+    chapter = cursor.fetchone()
+    if not chapter:
+        return None, (jsonify({"error": "Chapter not found"}), 404)
+    if chapter["status"] not in ("reviewed", "final"):
+        return None, (jsonify({"error": "Chapter must be reviewed or final to export", "status": chapter["status"]}), 400)
+
+    manuscript_content = chapter["manuscript_content"] or compose_manuscript_from_sources(cursor, chapter_id)
+    return (chapter, manuscript_content), None
+
+
+@app.get("/chapters/<chapter_id>/export.docx")
+@require_api_key
+def export_chapter_docx(chapter_id):
+    """ADR-015 — exportação somente-leitura do manuscrito já revisado. Não promove o status
+    do capítulo; pode ser chamado quantas vezes o curador quiser enquanto ainda lapida o texto."""
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            loaded, error = load_chapter_manuscript_for_export(cursor, chapter_id)
+            if error:
+                return error
+            chapter, manuscript_content = loaded
+
+    buffer = build_chapter_docx(chapter["book_project_title"], chapter["title"], manuscript_content)
+    ascii_name = re.sub(r"[^A-Za-z0-9_\-. ]", "_", chapter["title"]).strip() or "capitulo"
+    utf8_name = quote(f"{chapter['title']}.docx")
+    return Response(
+        buffer.read(),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename=\"{ascii_name}.docx\"; filename*=UTF-8''{utf8_name}"},
+    )
+
+
+@app.get("/chapters/<chapter_id>/export/manifest")
+@require_api_key
+def export_chapter_manifest(chapter_id):
+    """ADR-015 §5 — rastreabilidade: lista segment_id/título de cada bloco literal exportado.
+    Reconstituível a qualquer momento a partir do manuscript_content, não é persistido à parte."""
+    with get_connection() as connection:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            loaded, error = load_chapter_manuscript_for_export(cursor, chapter_id)
+            if error:
+                return error
+            _chapter, manuscript_content = loaded
+
+    segments = []
+
+    def walk(node):
+        if not isinstance(node, dict):
+            return
+        if node.get("type") == "literalSegment":
+            attrs = node.get("attrs") or {}
+            if attrs.get("segmentId"):
+                segments.append({"segment_id": attrs["segmentId"], "title": attrs.get("title")})
+        for child in node.get("content") or []:
+            walk(child)
+
+    walk(manuscript_content)
+    return jsonify({"chapter_id": chapter_id, "segments": segments})
 
 
 @app.post("/chapters/<chapter_id>/approve")

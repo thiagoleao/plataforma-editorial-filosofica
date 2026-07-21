@@ -119,10 +119,11 @@ Endpoints implementados (`editorial-api/main.py`):
 - [ADR-020](./docs/adr/ADR-020.md) — Editor de Manuscrito com Preservação de Blocos Literais. **Implementada em 2026-07-16** (Fase A e Fase B). Fase A: edição rica (Tiptap) de blocos de transição no `ChapterBuilder`. Fase B: página `/chapters/<id>/manuscript` compondo um documento contínuo a partir das fontes do capítulo, com blocos `literal_segment` travados por dupla defesa — nó Tiptap sem superfície editável + `filterTransaction` no cliente, e verificação server-side obrigatória em `PUT /chapters/<id>/manuscript` (nunca confia no cliente) que rejeita qualquer remoção ou adulteração de texto de bloco travado. Checkpoints explícitos ("salvar versão") em `chapter_manuscript_revisions`. Autosave foi deliberadamente **não implementado** nas duas fases, pela mesma razão: um loop real de re-save contra produção na Fase A (ver nota de implementação). Ver nota de implementação na ADR para o relato completo, incluindo os testes explícitos da trava dupla.
 - [ADR-021](./docs/adr/ADR-021.md) — Refresh de Design. **Implementada em 2026-07-16.** Decisão original (shadcn/ui, rollout distribuído) substituída antes de qualquer código: sistema "glass" (glassmorphism) portado quase literalmente do projeto irmão `ESCRITÓRIO DE ARQUITETURA` (mesmo workspace) — cards com `backdrop-blur`, fundo com foto + gradiente, paleta índigo, pílulas arredondadas, tudo como classes Tailwind (`glass-card`/`glass-pill`/`glass-input`/etc.), sem lib de componentes nova. Identidade visual própria (logo, ícone Φ, fundo de biblioteca) a partir dos assets fornecidos pelo usuário em `imagens/`, otimizados para `editorial-ui/public/images/`. Marca renomeada 100%: "Curadoria Editorial" → "Plataforma Editorial Filosófica" em todo lugar. Sidebar persistente (Projetos/Sugestões, `lucide-react`) substitui o header antigo. Rollout aplicado de uma vez em todas as telas existentes (não distribuído, diferente do plano original — ver nota de implementação). Testado em light/dark, local e produção (revisão `editorial-ui-00014-zjh`).
 - [ADR-023](./docs/adr/ADR-023.md) — Fechar o Backlog de Destilação e Expor o Valor do Acervo. **Implementada em 2026-07-17.** Motivada por investigação direta nos dados de produção (só 23/172 sessões transcritas processadas, 0 capítulos `reviewed`/`final`, 0 relações tipadas em 1648, nenhuma tela para navegar o acervo fora do `ChapterBuilder`). Os 4 itens da decisão: (1) Fluxo 02 processa 5 arquivos por execução em vez de 1 (publicado no n8n); (2) tela `/acervo` ("Explorar Acervo") na `editorial-ui`, leitura pura fora do fluxo de montagem de capítulo; (3) `POST /segment-insights/generate-batch`, geração de insight em lote sob controle explícito (nunca automática, preserva a cautela de custo da ADR-022 §2); (4) projeto de teste removido. **Achado não previsto durante a implementação**: deadlock pré-existente em `recalculate_concept_graph()` (chamada por todo upsert de segmento/ficha) sob concorrência — corrigido com `pg_advisory_xact_lock` adquirido como primeiro comando de cada transação (não bastou adquirir só antes da função, ver nota de implementação da ADR para o relato completo, incluindo a primeira correção incompleta). Validado com chamadas concorrentes reais e duas execuções reais do Fluxo 02 no n8n.
+- [ADR-015](./docs/adr/ADR-015.md) — Publicação Final, revisada e **implementada em 2026-07-20**. Motivada pelo primeiro capítulo do projeto a chegar a `status: reviewed` ("Cura Emocional e Divino Feminino", projeto "Isso vale ouro", 15 fontes — a condição que faltava desde que a ADR-023 apontou o problema). Desenho original (DOCX como formato primário de edição) substituído: a edição já acontece na plataforma via ADR-020, então a exportação é um derivado somente-leitura de `chapters.manuscript_content`. `GET /chapters/<id>/export.docx` (python-docx, só capítulos `reviewed`/`final`) e `GET /chapters/<id>/export/manifest`; proxy `app/api/chapters/[chapterId]/export` na `editorial-ui` injeta a chave de serviço no servidor; botão "Baixar DOCX" na tela do capítulo. Exportar não promove o status automaticamente. Livro inteiro compilado e PDF/EPUB ficam fora de escopo por enquanto. Ver nota de implementação na ADR.
 
 ## Roadmap de ADRs propostas
 
-**Despriorizada (2026-07-16):** [ADR-015](./docs/adr/ADR-015.md) — Publicação Final (DOCX/PDF/EPUB). Continua "Proposta", mas o usuário decidiu explicitamente adiá-la — não faz sentido investir em exportação final antes do acervo/capítulos terem conteúdo real percorrendo o pipeline até o fim, e o desenho precisaria ser revisto em cima do manuscrito (ADR-020) de qualquer forma (a ADR-015 foi escrita antes da ADR-020 existir). Nenhuma outra ADR proposta pendente no momento.
+Nenhuma ADR proposta pendente no momento.
 
 ### Roadmap Editorial UI v2 (2026-07-15)
 
@@ -183,7 +184,7 @@ Livro
 
 ## Próxima evolução
 
-ADR-023 implementada em 2026-07-17. Nenhuma ADR proposta pendente no momento — ADR-015 (Publicação Final) segue despriorizada até o acervo/capítulos terem conteúdo real percorrendo o pipeline até o fim (ver "Roadmap de ADRs propostas" acima).
+ADR-023 (2026-07-17) e ADR-015 (2026-07-20, revisada) implementadas. Nenhuma ADR proposta pendente no momento (ver "Roadmap de ADRs propostas" acima).
 
 ## Estrutura do repositório
 
@@ -203,7 +204,7 @@ LIVRO/  (remoto GitHub: plataforma-editorial-filosofica)
 │       ├── ADR-012.md          # IMPLEMENTADA — Mapa Filosófico automatizado + busca semântica (embeddings OpenAI)
 │       ├── ADR-013.md          # IMPLEMENTADA — Projetos de Livro e montagem de capítulos
 │       ├── ADR-014.md          # IMPLEMENTADA — revisão editorial e consolidação
-│       ├── ADR-015.md          # PROPOSTA — publicação final (DOCX/PDF/EPUB)
+│       ├── ADR-015.md          # IMPLEMENTADA — exportação DOCX por capítulo (manuscrito revisado da ADR-020)
 │       ├── ADR-016.md          # IMPLEMENTADA — curadoria manual como fluxo principal (editorial-ui)
 │       ├── ADR-017.md          # APROVADA — processo: planejar → ADR → aprovar → desenvolver
 │       ├── ADR-018.md          # REJEITADA NA IMPLEMENTAÇÃO — acesso público via NextAuth (revertido, ver nota)

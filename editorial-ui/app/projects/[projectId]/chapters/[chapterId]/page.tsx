@@ -33,12 +33,22 @@ export default async function ChapterPage({
           <h1 className="text-2xl font-semibold">
             #{chapter.chapter_order} {chapter.title}
           </h1>
-          <Link
-            href={`/projects/${projectId}/chapters/${chapterId}/manuscript`}
-            className="glass-pill glass-pill-secondary glass-pill-sm"
-          >
-            Ver manuscrito
-          </Link>
+          <div className="flex gap-2">
+            {(chapter.status === "reviewed" || chapter.status === "final") && (
+              <a
+                href={`/api/chapters/${chapterId}/export`}
+                className="glass-pill glass-pill-secondary glass-pill-sm"
+              >
+                Baixar DOCX
+              </a>
+            )}
+            <Link
+              href={`/projects/${projectId}/chapters/${chapterId}/manuscript`}
+              className="glass-pill glass-pill-secondary glass-pill-sm"
+            >
+              Ver manuscrito
+            </Link>
+          </div>
         </div>
       </div>
       <ChapterBuilder key={sourcesKey} chapter={chapter} concepts={concepts} />
